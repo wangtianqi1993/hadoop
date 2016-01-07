@@ -110,6 +110,7 @@
         <configuration>
           <excludes>
             <exclude>CHANGES.txt</exclude>
+            <exclude>CHANGES-yarn-2877.txt</exclude>
           </excludes>
         </configuration>
       </plugin>
