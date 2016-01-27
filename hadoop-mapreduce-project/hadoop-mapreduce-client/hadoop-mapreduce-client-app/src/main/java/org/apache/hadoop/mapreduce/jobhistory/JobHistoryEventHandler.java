@@ -1089,10 +1089,10 @@ public class JobHistoryEventHandler extends AbstractService
   // jobId, timestamp and entityType.
   private org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity 
       createJobEntity(HistoryEvent event, long timestamp, JobId jobId, 
-      String entityType) {
-    
-    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity = 
-        createBaseEntity(event, timestamp, entityType);
+      String entityType, boolean setCreatedTime) {
+
+    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity =
+        createBaseEntity(event, timestamp, entityType, setCreatedTime);
     entity.setId(jobId.toString());
     return entity;
   }
@@ -1100,8 +1100,9 @@ public class JobHistoryEventHandler extends AbstractService
   // create BaseEntity from HistoryEvent with adding other info, like: 
   // timestamp and entityType.
   private org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity 
-      createBaseEntity(HistoryEvent event, long timestamp, String entityType) {
-    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEvent tEvent = 
+      createBaseEntity(HistoryEvent event, long timestamp, String entityType,
+      boolean setCreatedTime) {
+    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEvent tEvent =
         event.toTimelineEvent();
     tEvent.setTimestamp(timestamp);
     
@@ -1109,6 +1110,9 @@ public class JobHistoryEventHandler extends AbstractService
         new org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity();
     entity.addEvent(tEvent);
     entity.setType(entityType);
+    if (setCreatedTime) {
+      entity.setCreatedTime(timestamp);
+    }
     return entity;
   }
   
@@ -1116,9 +1120,10 @@ public class JobHistoryEventHandler extends AbstractService
   // taskId, jobId, timestamp, entityType and relatedJobEntity.
   private org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity 
       createTaskEntity(HistoryEvent event, long timestamp, String taskId,
-      String entityType, String relatedJobEntity, JobId jobId) {
-    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity = 
-        createBaseEntity(event, timestamp, entityType);
+      String entityType, String relatedJobEntity, JobId jobId,
+      boolean setCreatedTime) {
+    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity =
+        createBaseEntity(event, timestamp, entityType, setCreatedTime);
     entity.setId(taskId);
     entity.addIsRelatedToEntity(relatedJobEntity, jobId.toString());
     return entity;
@@ -1129,9 +1134,9 @@ public class JobHistoryEventHandler extends AbstractService
   private org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity 
       createTaskAttemptEntity(HistoryEvent event, long timestamp, 
       String taskAttemptId, String entityType, String relatedTaskEntity, 
-      String taskId) {
-    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity = 
-        createBaseEntity(event, timestamp, entityType);
+      String taskId, boolean setCreatedTime) {
+    org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity =
+        createBaseEntity(event, timestamp, entityType, setCreatedTime);
     entity.setId(taskAttemptId);
     entity.addIsRelatedToEntity(relatedTaskEntity, taskId);
     return entity;
@@ -1142,10 +1147,13 @@ public class JobHistoryEventHandler extends AbstractService
     org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity tEntity = null;
     String taskId = null;
     String taskAttemptId = null;
+    boolean setCreatedTime = false;
 
     switch (event.getEventType()) {
       // Handle job events
       case JOB_SUBMITTED:
+        setCreatedTime = true;
+        break;
       case JOB_STATUS_CHANGED:
       case JOB_INFO_CHANGED:
       case JOB_INITED:
@@ -1160,6 +1168,7 @@ public class JobHistoryEventHandler extends AbstractService
         break;
       // Handle task events
       case TASK_STARTED:
+        setCreatedTime = true;
         taskId = ((TaskStartedEvent)event).getTaskId().toString();
         break;
       case TASK_FAILED:
@@ -1172,8 +1181,13 @@ public class JobHistoryEventHandler extends AbstractService
         taskId = ((TaskFinishedEvent)event).getTaskId().toString();
         break;
       case MAP_ATTEMPT_STARTED:
-      case CLEANUP_ATTEMPT_STARTED:
       case REDUCE_ATTEMPT_STARTED:
+        setCreatedTime = true;
+        taskId = ((TaskAttemptStartedEvent)event).getTaskId().toString();
+        taskAttemptId = ((TaskAttemptStartedEvent)event).
+            getTaskAttemptId().toString();
+        break;
+      case CLEANUP_ATTEMPT_STARTED:
       case SETUP_ATTEMPT_STARTED:
         taskId = ((TaskAttemptStartedEvent)event).getTaskId().toString();
         taskAttemptId = ((TaskAttemptStartedEvent)event).
@@ -1212,17 +1226,18 @@ public class JobHistoryEventHandler extends AbstractService
     if (taskId == null) {
       // JobEntity
       tEntity = createJobEntity(event, timestamp, jobId,
-          MAPREDUCE_JOB_ENTITY_TYPE);
+          MAPREDUCE_JOB_ENTITY_TYPE, setCreatedTime);
     } else {
       if (taskAttemptId == null) {
         // TaskEntity
         tEntity = createTaskEntity(event, timestamp, taskId,
-            MAPREDUCE_TASK_ENTITY_TYPE, MAPREDUCE_JOB_ENTITY_TYPE, jobId);
+            MAPREDUCE_TASK_ENTITY_TYPE, MAPREDUCE_JOB_ENTITY_TYPE,
+            jobId, setCreatedTime);
       } else {
         // TaskAttemptEntity
         tEntity = createTaskAttemptEntity(event, timestamp, taskAttemptId,
             MAPREDUCE_TASK_ATTEMPT_ENTITY_TYPE, MAPREDUCE_TASK_ENTITY_TYPE,
-            taskId);
+            taskId, setCreatedTime);
       }
     }
 

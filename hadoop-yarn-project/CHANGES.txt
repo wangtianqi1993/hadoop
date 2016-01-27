@@ -217,6 +217,9 @@ Branch YARN-2928: Timeline Server Next Generation: Phase 1
     YARN-4622. TestDistributedShell fails for v2 test cases after modifications for 1.5.
     (Naganarasimha G R via varunsaxena)
 
+    YARN-4238. createdTime and modifiedTime is not reported while publishing entities to ATSv2.
+    (Varun Saxena via Naganarasimha G R)
+
 Trunk - Unreleased
 
   INCOMPATIBLE CHANGES
