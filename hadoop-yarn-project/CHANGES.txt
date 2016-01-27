@@ -129,6 +129,9 @@ Branch YARN-2928: Timeline Server Next Generation: Phase 1
 
   IMPROVEMENTS
 
+    YARN-4224. Support fetching entities by UID and change the REST interface 
+    to conform to current REST APIs' in YARN. (Varun Saxena via gtcarrera9)
+
     YARN-4200. Refactor reader classes in storage to nest under hbase specific 
     package name. Contributed by Li Lu. 
 
