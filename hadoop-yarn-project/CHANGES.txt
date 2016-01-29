@@ -9,6 +9,8 @@ Trunk - Unreleased
     YARN-2882. Add an OPPORTUNISTIC ExecutionType. 
     (Konstantinos Karanasos and Inigo Goiri via kasha)
 
+    YARN-4512 [YARN-1011]. Provide a knob to turn on over-allocation. (kasha)
+
   IMPROVEMENTS
 
     YARN-2438. yarn-env.sh cleanup (aw)
