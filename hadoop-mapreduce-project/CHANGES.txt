@@ -231,6 +231,8 @@ Trunk (Unreleased)
 
     MAPREDUCE-6540. TestMRTimelineEventHandling fails (sjlee)
 
+    MAPREDUCE-6555. TestMRAppMaster fails on trunk. (Junping Du via ozawa)
+
   BREAKDOWN OF MAPREDUCE-2841 (NATIVE TASK) SUBTASKS
 
     MAPREDUCE-5985. native-task: Fix build on macosx. Contributed by
@@ -301,23 +303,37 @@ Trunk (Unreleased)
     MAPREDUCE-6525. Fix test failure of TestMiniMRClientCluster.testRestart.
     (Masatake Iwasaki via aajisaka)
 
+Release 2.9.0 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+    MAPREDUCE-6431. JobClient should be an AutoClosable (haibochen via rkanter)
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
 Release 2.8.0 - UNRELEASED
 
   INCOMPATIBLE CHANGES
 
   NEW FEATURES
 
-   MAPREDUCE-6284. Add Task Attempt State API to MapReduce Application
-   Master REST API. (Ryu Kobayashi via ozawa)
+    MAPREDUCE-6284. Add Task Attempt State API to MapReduce Application
+    Master REST API. (Ryu Kobayashi via ozawa)
 
-   MAPREDUCE-6364. Add a "Kill" link to Task Attempts page. (Ryu Kobayashi
-   via ozawa)
+    MAPREDUCE-6364. Add a "Kill" link to Task Attempts page. (Ryu Kobayashi
+    via ozawa)
 
-   MAPREDUCE-6304. Specifying node labels when submitting MR jobs.
-   (Naganarasimha G R via wangda)
+    MAPREDUCE-6304. Specifying node labels when submitting MR jobs.
+    (Naganarasimha G R via wangda)
 
-   MAPREDUCE-6415. Create a tool to combine aggregated logs into HAR files. 
-   (Robert Kanter via kasha)
+    MAPREDUCE-6415. Create a tool to combine aggregated logs into HAR files.
+    (Robert Kanter via kasha)
 
   IMPROVEMENTS
 
@@ -434,6 +450,21 @@ Release 2.8.0 - UNRELEASED
     MAPREDUCE-6499. Add elapsed time for retired job in JobHistoryServer WebUI.
     (Lin Yiqun via aajisaka)
 
+    MAPREDUCE-5870. Support for passing Job priority through Application
+    Submission Context in Mapreduce Side (Sunil G via jlowe)
+
+    MAPREDUCE-6566. Add retry support to mapreduce CLI tool.
+    (Varun Vasudev via xgong)
+
+    MAPREDUCE-6574. MR AM should print host of failed tasks. 
+    (Mohammad Shahid Khan via wangda)
+
+    MAPREDUCE-6584. Remove trailing whitespaces from mapred-default.xml.
+    (aajisaka)
+
+    MAPREDUCE-6595. Fix findbugs warnings in OutputCommitter and 
+    FileOutputCommitter. (Akira AJISAKA via junping_du)
+
   OPTIMIZATIONS
 
     MAPREDUCE-6376. Add avro binary support for jhist files (Ray Chiang via
@@ -441,6 +472,9 @@ Release 2.8.0 - UNRELEASED
 
     MAPREDUCE-6394. Speed up Task processing loop in HsTasksBlock#render()
     (Ray Chiang via jlowe)
+
+    MAPREDUCE-6473. Job submission can take a long time during Cluster
+    initialization (Kuhu Shukla via jlowe)
 
   BUG FIXES
 
@@ -614,30 +648,69 @@ Release 2.8.0 - UNRELEASED
     MAPREDUCE-6484. Yarn Client uses local address instead of RM address as
     token renewer in a secure cluster when RM HA is enabled. (Zhihai Xu)
 
-   MAPREDUCE-6480. archive-logs tool may miss applications (rkanter)
+    MAPREDUCE-6480. archive-logs tool may miss applications (rkanter)
 
-   MAPREDUCE-6494. Permission issue when running archive-logs tool as
-   different users (rkanter)
+    MAPREDUCE-6494. Permission issue when running archive-logs tool as
+    different users (rkanter)
 
-   MAPREDUCE-6485. Create a new task attempt with failed map task priority
-   if in-progress attempts are unassigned. (Xianyin Xin via rohithsharmaks)
+    MAPREDUCE-6485. Create a new task attempt with failed map task priority
+    if in-progress attempts are unassigned. (Xianyin Xin via rohithsharmaks)
 
-   MAPREDUCE-6503. archive-logs tool should use HADOOP_PREFIX instead
-   of HADOOP_HOME (rkanter)
+    MAPREDUCE-6503. archive-logs tool should use HADOOP_PREFIX instead
+    of HADOOP_HOME (rkanter)
 
-   MAPREDUCE-6302. Preempt reducers after a configurable timeout irrespective 
-   of headroom. (kasha)
+    MAPREDUCE-6302. Preempt reducers after a configurable timeout irrespective
+    of headroom. (kasha)
 
-   MAPREDUCE-6495. Docs for archive-logs tool (rkanter)
+    MAPREDUCE-6495. Docs for archive-logs tool (rkanter)
 
-   MAPREDUCE-6508. TestNetworkedJob fails consistently due to delegation 
-   token changes on RM. (Akira AJISAKA via junping_du)
+    MAPREDUCE-6508. TestNetworkedJob fails consistently due to delegation
+    token changes on RM. (Akira AJISAKA via junping_du)
 
-   MAPREDUCE-6515. Update Application priority in AM side from AM-RM heartbeat
-   (Sunil G via jlowe)
+    MAPREDUCE-6515. Update Application priority in AM side from AM-RM heartbeat
+    (Sunil G via jlowe)
 
-   MAPREDUCE-6533. testDetermineCacheVisibilities of
-   TestClientDistributedCacheManager is broken (Chang Li via jlowe)
+    MAPREDUCE-6533. testDetermineCacheVisibilities of
+    TestClientDistributedCacheManager is broken (Chang Li via jlowe)
+
+    MAPREDUCE-6553. Replace '\u2b05' with '<-' in rendering job configuration.
+    (Gabor Liptak via aajisaka)
+
+    MAPREDUCE-6557. Tests in mapreduce-client-app are writing outside of
+    target. (Akira AJISAKA via junping_du)
+
+    MAPREDUCE-6550. archive-logs tool changes log ownership to the Yarn
+    user when using DefaultContainerExecutor (rkanter)
+
+    MAPREDUCE-6419. JobHistoryServer doesn't sort properly based on Job ID when Job id's 
+    exceed 9999. (Mohammad Shahid Khan via rohithsharmaks)
+
+    MAPREDUCE-6589. TestTaskLog outputs a log under directory other than
+    target/test-dir. (aajisaka)
+
+    MAPREDUCE-6593. TestJobHistoryEventHandler.testTimelineEventHandling fails
+    on trunk because of NPE. (Naganarasimha G R via aajisaka)
+
+    MAPREDUCE-6068. Illegal progress value warnings in map tasks. (Binglin Chang
+    via junping_du)
+
+    MAPREDUCE-6601. Fix typo in Job#setUseNewAPI. (Kai Sasaki via aajisaka)
+
+    MAPREDUCE-6605. Fix typos mapreduce.map.skip.proc.count.autoincr and
+    mapreduce.reduce.skip.proc.count.autoincr in mapred-default.xml.
+    (Kai Sasaki via aajisaka)
+
+    MAPREDUCE-6614. Remove unnecessary code in TestMapreduceConfigFields.
+    (Kai Sasaki via aajisaka)
+
+    MAPREDUCE-6610. JobHistoryEventHandler should not swallow timeline response
+    (Li Lu via jianhe)
+
+    MAPREDUCE-6563. Streaming documentation contains a stray '%' character.
+    (cnauroth)
+
+    MAPREDUCE-6616. Fail to create jobhistory file if there are some multibyte
+    characters in the job name. (Kousuke Saruta via aajisaka)
 
 Release 2.7.3 - UNRELEASED
 
@@ -654,7 +727,19 @@ Release 2.7.3 - UNRELEASED
     MAPREDUCE-6377. JHS sorting on state column not working in webUi.
     (zhihai xu via devaraj)
 
-Release 2.7.2 - UNRELEASED
+    MAPREDUCE-5883. "Total megabyte-seconds" in job counters is slightly
+    misleading (Nathan Roberts via jlowe)
+
+    MAPREDUCE-6583. Clarify confusing sentence in MapReduce tutorial document.
+    (Kai Sasaki via aajisaka)
+
+    MAPREDUCE-6554. MRAppMaster servicestart failing with NPE in
+    MRAppMaster#parsePreviousJobHistory (Bibin A Chundatt via jlowe)
+
+    MAPREDUCE-6618. YarnClientProtocolProvider leaking the YarnClient thread.
+    (Xuan Gong via jlowe)
+
+Release 2.7.2 - 2016-01-25
 
   INCOMPATIBLE CHANGES
 
@@ -929,7 +1014,40 @@ Release 2.7.0 - 2015-04-20
     MAPREDUCE-6285. ClientServiceDelegate should not retry upon
     AuthenticationException. (Jonathan Eagles via ozawa)
 
-Release 2.6.3 - UNRELEASED
+Release 2.6.4 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+    MAPREDUCE-6436. JobHistory cache issue. (Kai Sasaki via zxu)
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
+    MAPREDUCE-6577. MR AM unable to load native library without
+    MR_AM_ADMIN_USER_ENV set (sjlee)
+
+    MAPREDUCE-5982. Task attempts that fail from the ASSIGNED state can
+    disappear (Chang Li via jlowe)
+
+    MAPREDUCE-6492. AsyncDispatcher exit with NPE on
+    TaskAttemptImpl#sendJHStartEventForAssignedFailTask (Bibin A Chundatt via
+    jlowe)
+
+    MAPREDUCE-6363. [NNBench] Lease mismatch error when running with multiple
+    mappers. (Vlad Sharanhovich and Bibin A Chundatt via aajisaka)
+
+    MAPREDUCE-6554. MRAppMaster servicestart failing with NPE in
+    MRAppMaster#parsePreviousJobHistory (Bibin A Chundatt via jlowe)
+
+    MAPREDUCE-6618. YarnClientProtocolProvider leaking the YarnClient thread.
+    (Xuan Gong via jlowe)
+
+Release 2.6.3 - 2015-12-17
 
   INCOMPATIBLE CHANGES
 
@@ -950,6 +1068,20 @@ Release 2.6.3 - UNRELEASED
 
     MAPREDUCE-6377. JHS sorting on state column not working in webUi.
     (zhihai xu via devaraj)
+
+    MAPREDUCE-5948. org.apache.hadoop.mapred.LineRecordReader does not handle
+    multibyte record delimiters well (Vinayakumar B, Rushabh Shah, and Akira
+    AJISAKA via jlowe)
+
+    MAPREDUCE-6481. LineRecordReader may give incomplete record and wrong
+    position/key information for uncompressed input sometimes. (Zhihai Xu via
+    jlowe)
+
+    MAPREDUCE-5883. "Total megabyte-seconds" in job counters is slightly
+    misleading (Nathan Roberts via jlowe)
+
+    MAPREDUCE-6549. multibyte delimiters with LineRecordReader cause 
+    duplicate records (wilfreds via rkanter)
 
 Release 2.6.2 - 2015-10-28
 

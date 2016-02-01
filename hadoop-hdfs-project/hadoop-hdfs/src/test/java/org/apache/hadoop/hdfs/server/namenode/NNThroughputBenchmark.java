@@ -68,6 +68,7 @@ import org.apache.hadoop.hdfs.server.protocol.StorageBlockReport;
 import org.apache.hadoop.hdfs.server.protocol.StorageReceivedDeletedBlocks;
 import org.apache.hadoop.hdfs.server.protocol.StorageReport;
 import org.apache.hadoop.io.EnumSetWritable;
+import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.net.DNS;
 import org.apache.hadoop.net.NetworkTopology;
 import org.apache.hadoop.security.Groups;
@@ -925,7 +926,7 @@ public class NNThroughputBenchmark implements Tool {
     NamespaceInfo nsInfo;
     DatanodeRegistration dnRegistration;
     DatanodeStorage storage; //only one storage 
-    final ArrayList<BlockReportReplica> blocks;
+    final List<BlockReportReplica> blocks;
     int nrBlocks; // actual number of blocks
     BlockListAsLongs blockReportList;
     final int dnIdx;
@@ -938,7 +939,7 @@ public class NNThroughputBenchmark implements Tool {
 
     TinyDatanode(int dnIdx, int blockCapacity) throws IOException {
       this.dnIdx = dnIdx;
-      this.blocks = new ArrayList<BlockReportReplica>(blockCapacity);
+      this.blocks = Arrays.asList(new BlockReportReplica[blockCapacity]);
       this.nrBlocks = 0;
     }
 
@@ -1013,7 +1014,7 @@ public class NNThroughputBenchmark implements Tool {
         Block block = new Block(blocks.size() - idx, 0, 0);
         blocks.set(idx, new BlockReportReplica(block));
       }
-      blockReportList = BlockListAsLongs.EMPTY;
+      blockReportList = BlockListAsLongs.encode(blocks);
     }
 
     BlockListAsLongs getBlockReportList() {
@@ -1098,6 +1099,8 @@ public class NNThroughputBenchmark implements Tool {
 
     BlockReportStats(List<String> args) {
       super();
+      numThreads = 10;
+      numOpsRequired = 30;
       this.blocksPerReport = 100;
       this.blocksPerFile = 10;
       // set heartbeat interval to 3 min, so that expiration were 40 min
@@ -1179,7 +1182,7 @@ public class NNThroughputBenchmark implements Tool {
     throws IOException {
       ExtendedBlock prevBlock = null;
       for(int jdx = 0; jdx < blocksPerFile; jdx++) {
-        LocatedBlock loc = clientProto.addBlock(fileName, clientName,
+        LocatedBlock loc = addBlock(fileName, clientName,
             prevBlock, null, HdfsConstants.GRANDFATHER_INODE_ID, null);
         prevBlock = loc.getBlock();
         for(DatanodeInfo dnInfo : loc.getLocations()) {
@@ -1193,8 +1196,39 @@ public class NNThroughputBenchmark implements Tool {
           dataNodeProto.blockReceivedAndDeleted(datanodes[dnIdx].dnRegistration,
               bpid, report);
         }
+        // IBRs are asynchronously processed by NameNode. The next
+        // ClientProtocol#addBlock() may throw NotReplicatedYetException.
       }
       return prevBlock;
+    }
+
+    /**
+     * Retry ClientProtocol.addBlock() if it throws NotReplicatedYetException.
+     * Because addBlock() also commits the previous block,
+     * it fails if enough IBRs are not processed by NameNode.
+     */
+    private LocatedBlock addBlock(String src, String clientName,
+        ExtendedBlock previous, DatanodeInfo[] excludeNodes, long fileId,
+        String[] favoredNodes) throws IOException {
+      for (int i = 0; i < 30; i++) {
+        try {
+          return clientProto.addBlock(src, clientName,
+              previous, excludeNodes, fileId, favoredNodes);
+        } catch (NotReplicatedYetException|RemoteException e) {
+          if (e instanceof RemoteException) {
+            String className = ((RemoteException) e).getClassName();
+            if (!className.equals(NotReplicatedYetException.class.getName())) {
+              throw e;
+            }
+          }
+          try {
+            Thread.sleep(100);
+          } catch (InterruptedException ie) {
+            LOG.warn("interrupted while retrying addBlock.", ie);
+          }
+        }
+      }
+      throw new IOException("failed to add block.");
     }
 
     /**
@@ -1258,7 +1292,7 @@ public class NNThroughputBenchmark implements Tool {
     ReplicationStats(List<String> args) {
       super();
       numThreads = 1;
-      numDatanodes = 3;
+      numDatanodes = 10;
       nodesToDecommission = 1;
       nodeReplicationLimit = 100;
       totalBlocks = 100;

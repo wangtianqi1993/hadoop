@@ -42,6 +42,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.ipc.CallerContext;
 import org.apache.hadoop.mapred.FileOutputCommitter;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.LocalContainerLauncher;
@@ -244,7 +245,7 @@ public class MRAppMaster extends CompositeService {
       ContainerId containerId, String nmHost, int nmPort, int nmHttpPort,
       long appSubmitTime) {
     this(applicationAttemptId, containerId, nmHost, nmPort, nmHttpPort,
-        new SystemClock(), appSubmitTime);
+        SystemClock.getInstance(), appSubmitTime);
   }
 
   public MRAppMaster(ApplicationAttemptId applicationAttemptId,
@@ -1544,6 +1545,10 @@ public class MRAppMaster extends CompositeService {
       ContainerId containerId = ConverterUtils.toContainerId(containerIdStr);
       ApplicationAttemptId applicationAttemptId =
           containerId.getApplicationAttemptId();
+      if (applicationAttemptId != null) {
+        CallerContext.setCurrent(new CallerContext.Builder(
+            "mr_appmaster_" + applicationAttemptId.toString()).build());
+      }
       long appSubmitTime = Long.parseLong(appSubmitTimeStr);
       
       

@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +35,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.HadoopIllegalArgumentException;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.fs.CreateFlag;
@@ -250,6 +252,8 @@ public class DFSStripedOutputStream extends DFSOutputStream {
   private ExtendedBlock currentBlockGroup;
   private final String[] favoredNodes;
   private final List<StripedDataStreamer> failedStreamers;
+  private final Map<Integer, Integer> corruptBlockCountMap;
+  private int blockGroupIndex;
 
   /** Construct a new output stream for creating a file. */
   DFSStripedOutputStream(DFSClient dfsClient, String src, HdfsFileStatus stat,
@@ -268,6 +272,7 @@ public class DFSStripedOutputStream extends DFSOutputStream {
     numAllBlocks = numDataBlocks + numParityBlocks;
     this.favoredNodes = favoredNodes;
     failedStreamers = new ArrayList<>();
+    corruptBlockCountMap = new LinkedHashMap<>();
 
     encoder = CodecUtil.createRSRawEncoder(dfsClient.getConfiguration(),
         numDataBlocks, numParityBlocks);
@@ -444,6 +449,7 @@ public class DFSStripedOutputStream extends DFSOutputStream {
     }
     // assign the new block to the current block group
     currentBlockGroup = lb.getBlock();
+    blockGroupIndex++;
 
     final LocatedBlock[] blocks = StripedBlockUtil.parseStripedBlockGroup(
         (LocatedStripedBlock) lb, cellSize, numDataBlocks,
@@ -590,6 +596,7 @@ public class DFSStripedOutputStream extends DFSOutputStream {
     while (newFailed.size() > 0) {
       failedStreamers.addAll(newFailed);
       coordinator.clearFailureStates();
+      corruptBlockCountMap.put(blockGroupIndex, failedStreamers.size());
 
       // mark all the healthy streamers as external error
       Set<StripedDataStreamer> healthySet = markExternalErrorOnStreamers();
@@ -757,16 +764,19 @@ public class DFSStripedOutputStream extends DFSOutputStream {
   }
 
   @Override
-  synchronized void abort() throws IOException {
-    if (isClosed()) {
-      return;
+  void abort() throws IOException {
+    synchronized (this) {
+      if (isClosed()) {
+        return;
+      }
+      for (StripedDataStreamer streamer : streamers) {
+        streamer.getLastException().set(
+            new IOException("Lease timeout of "
+                + (dfsClient.getConf().getHdfsTimeout() / 1000)
+                + " seconds expired."));
+      }
+      closeThreads(true);
     }
-    for (StripedDataStreamer streamer : streamers) {
-      streamer.getLastException().set(new IOException("Lease timeout of "
-          + (dfsClient.getConf().getHdfsTimeout()/1000) +
-          " seconds expired."));
-    }
-    closeThreads(true);
     dfsClient.endFileLease(fileId);
   }
 
@@ -954,14 +964,15 @@ public class DFSStripedOutputStream extends DFSOutputStream {
                dfsClient.getTracer().newScope("completeFile")) {
         completeFile(currentBlockGroup);
       }
-      dfsClient.endFileLease(fileId);
+      logCorruptBlocks();
     } catch (ClosedChannelException ignored) {
     } finally {
       setClosed();
     }
   }
 
-  private void enqueueAllCurrentPackets() throws IOException {
+  @VisibleForTesting
+  void enqueueAllCurrentPackets() throws IOException {
     int idx = streamers.indexOf(getCurrentStreamer());
     for(int i = 0; i < streamers.size(); i++) {
       final StripedDataStreamer si = setCurrentStreamer(i);
@@ -999,6 +1010,20 @@ public class DFSStripedOutputStream extends DFSOutputStream {
     } catch(InterruptedException ie) {
       throw DFSUtilClient.toInterruptedIOException(
           "Sleep interrupted during " + op, ie);
+    }
+  }
+
+  private void logCorruptBlocks() {
+    for (Map.Entry<Integer, Integer> entry : corruptBlockCountMap.entrySet()) {
+      int bgIndex = entry.getKey();
+      int corruptBlockCount = entry.getValue();
+      StringBuilder sb = new StringBuilder();
+      sb.append("Block group <").append(bgIndex).append("> has ")
+          .append(corruptBlockCount).append(" corrupt blocks.");
+      if (corruptBlockCount == numAllBlocks - numDataBlocks) {
+        sb.append(" It's at high risk of losing data.");
+      }
+      LOG.warn(sb.toString());
     }
   }
 

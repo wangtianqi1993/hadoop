@@ -428,7 +428,7 @@ for ldap providers in the same way as above does.
 </property>
 
 <property>
-  <name>hadoop.work.around.non.threadsafe.getpwuid</name>
+  <name>hadoop.workaround.non.threadsafe.getpwuid</name>
   <value>false</value>
   <description>Some operating systems or authentication modules are known to
   have broken implementations of getpwuid_r and getpwgid_r, such that these
@@ -464,6 +464,12 @@ for ldap providers in the same way as above does.
   <name>hadoop.security.auth_to_local</name>
   <value></value>
   <description>Maps kerberos principals to local user names</description>
+</property>
+
+<property>
+  <name>hadoop.token.files</name>
+  <value></value>
+  <description>List of token cache files that have delegation tokens for hadoop service</description>
 </property>
 
 <!-- i/o properties -->
@@ -937,6 +943,12 @@ for ldap providers in the same way as above does.
 </property>
 
 <property>
+  <name>fs.AbstractFileSystem.s3a.impl</name>
+  <value>org.apache.hadoop.fs.s3a.S3A</value>
+  <description>The implementation class of the S3A AbstractFileSystem.</description>
+</property>
+
+<property>
   <name>io.seqfile.compress.blocksize</name>
   <value>1000000</value>
   <description>The minimum block size for compression in block compressed 
@@ -1057,6 +1069,35 @@ for ldap providers in the same way as above does.
   <name>ipc.client.low-latency</name>
   <value>false</value>
   <description>Use low-latency QoS markers for IPC connections.
+  </description>
+</property>
+
+<property>
+  <name>ipc.client.ping</name>
+  <value>true</value>
+  <description>Send a ping to the server when timeout on reading the response,
+  if set to true. If no failure is detected, the client retries until at least
+  a byte is read.
+  </description>
+</property>
+
+<property>
+  <name>ipc.ping.interval</name>
+  <value>60000</value>
+  <description>Timeout on waiting response from server, in milliseconds.
+  The client will send ping when the interval is passed without receiving bytes,
+  if ipc.client.ping is set to true.
+  </description>
+</property>
+
+<property>
+  <name>ipc.client.rpc-timeout.ms</name>
+  <value>0</value>
+  <description>Timeout on waiting response from server, in milliseconds.
+  Currently this timeout works only when ipc.client.ping is set to true
+  because it uses the same facilities with IPC ping.
+  The timeout overrides the ipc.ping.interval and client will throw exception
+  instead of sending ping when the interval is passed.
   </description>
 </property>
 
@@ -2049,5 +2090,15 @@ for ldap providers in the same way as above does.
     <value></value>
     <description>The class names of the Span Receivers to use for Hadoop.
     </description>
+  </property>
+
+  <property>
+    <description>
+      Enable the "/logs" endpoint on all Hadoop daemons, which serves local
+      logs, but may be considered a security risk due to it listing the contents
+      of a directory.
+    </description>
+    <name>hadoop.http.logs.enabled</name>
+    <value>true</value>
   </property>
 </configuration>

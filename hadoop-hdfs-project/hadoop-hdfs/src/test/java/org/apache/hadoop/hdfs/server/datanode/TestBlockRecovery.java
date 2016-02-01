@@ -39,8 +39,11 @@ import java.net.InetSocketAddress;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.logging.Log;
@@ -60,6 +63,7 @@ import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
+import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicy;
 import org.apache.hadoop.hdfs.protocol.ExtendedBlock;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
 import org.apache.hadoop.hdfs.protocol.RecoveryInProgressException;
@@ -67,8 +71,10 @@ import org.apache.hadoop.hdfs.protocolPB.DatanodeProtocolClientSideTranslatorPB;
 import org.apache.hadoop.hdfs.server.common.HdfsServerConstants.ReplicaState;
 import org.apache.hadoop.hdfs.server.datanode.BlockRecoveryWorker.BlockRecord;
 import org.apache.hadoop.hdfs.server.datanode.fsdataset.ReplicaOutputStreams;
+import org.apache.hadoop.hdfs.server.namenode.ErasureCodingPolicyManager;
 import org.apache.hadoop.hdfs.server.namenode.FSNamesystem;
 import org.apache.hadoop.hdfs.server.protocol.BlockRecoveryCommand.RecoveringBlock;
+import org.apache.hadoop.hdfs.server.protocol.BlockRecoveryCommand.RecoveringStripedBlock;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeCommand;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeProtocol;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeRegistration;
@@ -89,6 +95,10 @@ import org.junit.Test;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
+
+import com.google.common.base.Supplier;
+
+import static org.apache.hadoop.hdfs.TestLeaseRecoveryStriped.BLOCK_LENGTHS_SUITE;
 
 /**
  * This tests if sync all replicas in block recovery works correctly
@@ -181,8 +191,33 @@ public class TestBlockRecovery {
     };
     // Trigger a heartbeat so that it acknowledges the NN as active.
     dn.getAllBpOs().get(0).triggerHeartbeatForTests();
+    waitForActiveNN();
+
     spyDN = spy(dn);
     recoveryWorker = new BlockRecoveryWorker(spyDN);
+  }
+
+  /**
+   * Wait for active NN up to 15 seconds.
+   */
+  private void waitForActiveNN() {
+    try {
+      GenericTestUtils.waitFor(new Supplier<Boolean>() {
+        @Override
+        public Boolean get() {
+          return dn.getAllBpOs().get(0).getActiveNN() != null;
+        }
+      }, 1000, 15 * 1000);
+    } catch (TimeoutException e) {
+      // Here its not failing, will again do the assertions for activeNN after
+      // this waiting period and fails there if BPOS has not acknowledged
+      // any NN as active.
+      LOG.warn("Failed to get active NN", e);
+    } catch (InterruptedException e) {
+      LOG.warn("InterruptedException while waiting to see active NN", e);
+    }
+    Assert.assertNotNull("Failed to get ActiveNN",
+        dn.getAllBpOs().get(0).getActiveNN());
   }
 
   /**
@@ -215,8 +250,7 @@ public class TestBlockRecovery {
     
     DatanodeInfo[] locs = new DatanodeInfo[]{
         mock(DatanodeInfo.class), mock(DatanodeInfo.class)};
-    RecoveringBlock rBlock = new RecoveringBlock(block, 
-        locs, RECOVERY_ID);
+    RecoveringBlock rBlock = new RecoveringBlock(block, locs, RECOVERY_ID);
     ArrayList<BlockRecord> syncList = new ArrayList<BlockRecord>(2);
     BlockRecord record1 = new BlockRecord(
         DFSTestUtil.getDatanodeInfo("1.2.3.4", "bogus", 1234), dn1, replica1);
@@ -715,6 +749,30 @@ public class TestBlockRecovery {
       exceptionThrown = true;
     } finally {
       assertTrue(exceptionThrown);
+    }
+  }
+
+  @Test
+  public void testSafeLength() throws Exception {
+    ErasureCodingPolicy ecPolicy = ErasureCodingPolicyManager
+        .getSystemDefaultPolicy();
+    RecoveringStripedBlock rBlockStriped = new RecoveringStripedBlock(rBlock,
+        new byte[9], ecPolicy);
+    BlockRecoveryWorker recoveryWorker = new BlockRecoveryWorker(dn);
+    BlockRecoveryWorker.RecoveryTaskStriped recoveryTask =
+        recoveryWorker.new RecoveryTaskStriped(rBlockStriped);
+
+    for (int i = 0; i < BLOCK_LENGTHS_SUITE.length; i++) {
+      int[] blockLengths = BLOCK_LENGTHS_SUITE[i][0];
+      int safeLength = BLOCK_LENGTHS_SUITE[i][1][0];
+      Map<Long, BlockRecord> syncList = new HashMap<>();
+      for (int id = 0; id < blockLengths.length; id++) {
+        ReplicaRecoveryInfo rInfo = new ReplicaRecoveryInfo(id,
+            blockLengths[id], 0, null);
+        syncList.put((long) id, new BlockRecord(null, null, rInfo));
+      }
+      Assert.assertEquals("BLOCK_LENGTHS_SUITE[" + i + "]", safeLength,
+          recoveryTask.getSafeLength(syncList));
     }
   }
 }

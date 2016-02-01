@@ -29,6 +29,7 @@ import org.apache.hadoop.util.ReflectionUtils;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.Iterator;
 
 /**
  * Provide block access for FsDataset white box tests.
@@ -242,4 +243,37 @@ public interface FsDatasetTestUtils {
    * Get the persistently stored generation stamp.
    */
   long getStoredGenerationStamp(ExtendedBlock block) throws IOException;
+
+  /**
+   * Change the persistently stored generation stamp.
+   * @param block the block whose generation stamp will be changed
+   * @param newGenStamp the new generation stamp
+   * @throws IOException
+   */
+  void changeStoredGenerationStamp(ExtendedBlock block, long newGenStamp)
+      throws IOException;
+
+  /** Get all stored replicas in the specified block pool. */
+  Iterator<Replica> getStoredReplicas(String bpid) throws IOException;
+
+  /**
+   * Get the number of pending async deletions.
+   */
+  long getPendingAsyncDeletions();
+
+  /**
+   * Verify the existence of the block pool.
+   *
+   * @param bpid block pool ID
+   * @throws IOException if the block pool does not exist.
+   */
+  void verifyBlockPoolExists(String bpid) throws IOException;
+
+  /**
+   * Verify that the block pool does not exist.
+   *
+   * @param bpid block pool ID
+   * @throws IOException if the block pool does exist.
+   */
+  void verifyBlockPoolMissing(String bpid) throws IOException;
 }

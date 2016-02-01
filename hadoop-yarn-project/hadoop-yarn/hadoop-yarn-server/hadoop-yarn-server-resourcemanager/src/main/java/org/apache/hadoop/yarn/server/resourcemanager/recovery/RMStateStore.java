@@ -37,6 +37,7 @@ import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.ipc.CallerContext;
 import org.apache.hadoop.security.Credentials;
 import org.apache.hadoop.security.token.delegation.DelegationKey;
 import org.apache.hadoop.service.AbstractService;
@@ -94,7 +95,7 @@ public abstract class RMStateStore extends AbstractService {
       "ReservationSystemRoot";
   protected static final String VERSION_NODE = "RMVersionNode";
   protected static final String EPOCH_NODE = "EpochNode";
-  private ResourceManager resourceManager;
+  protected ResourceManager resourceManager;
   private final ReadLock readLock;
   private final WriteLock writeLock;
 
@@ -134,6 +135,10 @@ public abstract class RMStateStore extends AbstractService {
           EnumSet.of(RMStateStoreState.ACTIVE, RMStateStoreState.FENCED),
           RMStateStoreEventType.UPDATE_APP_ATTEMPT,
           new UpdateAppAttemptTransition())
+      .addTransition(RMStateStoreState.ACTIVE,
+          EnumSet.of(RMStateStoreState.ACTIVE, RMStateStoreState.FENCED),
+          RMStateStoreEventType.REMOVE_APP_ATTEMPT,
+          new RemoveAppAttemptTransition())
       .addTransition(RMStateStoreState.ACTIVE,
           EnumSet.of(RMStateStoreState.ACTIVE, RMStateStoreState.FENCED),
           RMStateStoreEventType.STORE_MASTERKEY,
@@ -551,6 +556,32 @@ public abstract class RMStateStore extends AbstractService {
     return isFenced ? RMStateStoreState.FENCED : RMStateStoreState.ACTIVE;
   }
 
+  private static class RemoveAppAttemptTransition implements
+      MultipleArcTransition<RMStateStore, RMStateStoreEvent,
+          RMStateStoreState> {
+    @Override
+    public RMStateStoreState transition(RMStateStore store,
+        RMStateStoreEvent event) {
+      if (!(event instanceof RMStateStoreRemoveAppAttemptEvent)) {
+        // should never happen
+        LOG.error("Illegal event type: " + event.getClass());
+        return RMStateStoreState.ACTIVE;
+      }
+      boolean isFenced = false;
+      ApplicationAttemptId attemptId =
+          ((RMStateStoreRemoveAppAttemptEvent) event).getApplicationAttemptId();
+      ApplicationId appId = attemptId.getApplicationId();
+      LOG.info("Removing attempt " + attemptId + " from app: " + appId);
+      try {
+        store.removeApplicationAttemptInternal(attemptId);
+      } catch (Exception e) {
+        LOG.error("Error removing attempt: " + attemptId, e);
+        isFenced = store.notifyStoreOperationFailedInternal(e);
+      }
+      return finalState(isFenced);
+    }
+  }
+
   public RMStateStore() {
     super(RMStateStore.class.getName());
     ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
@@ -736,18 +767,18 @@ public abstract class RMStateStore extends AbstractService {
    * RMAppStoredEvent will be sent on completion to notify the RMApp
    */
   @SuppressWarnings("unchecked")
-  public synchronized void storeNewApplication(RMApp app) {
+  public void storeNewApplication(RMApp app) {
     ApplicationSubmissionContext context = app
                                             .getApplicationSubmissionContext();
     assert context instanceof ApplicationSubmissionContextPBImpl;
     ApplicationStateData appState =
-        ApplicationStateData.newInstance(
-            app.getSubmitTime(), app.getStartTime(), context, app.getUser());
+        ApplicationStateData.newInstance(app.getSubmitTime(),
+            app.getStartTime(), context, app.getUser(), app.getCallerContext());
     dispatcher.getEventHandler().handle(new RMStateStoreAppEvent(appState));
   }
 
   @SuppressWarnings("unchecked")
-  public synchronized void updateApplicationState(
+  public void updateApplicationState(
       ApplicationStateData appState) {
     dispatcher.getEventHandler().handle(new RMStateUpdateAppEvent(appState));
   }
@@ -779,7 +810,7 @@ public abstract class RMStateStore extends AbstractService {
    * This does not block the dispatcher threads
    * RMAppAttemptStoredEvent will be sent on completion to notify the RMAppAttempt
    */
-  public synchronized void storeNewApplicationAttempt(RMAppAttempt appAttempt) {
+  public void storeNewApplicationAttempt(RMAppAttempt appAttempt) {
     Credentials credentials = getCredentialsFromAppAttempt(appAttempt);
 
     AggregateAppResourceUsage resUsage =
@@ -797,7 +828,7 @@ public abstract class RMStateStore extends AbstractService {
   }
 
   @SuppressWarnings("unchecked")
-  public synchronized void updateApplicationAttemptState(
+  public void updateApplicationAttemptState(
       ApplicationAttemptStateData attemptState) {
     dispatcher.getEventHandler().handle(
       new RMStateUpdateAppAttemptEvent(attemptState));
@@ -962,11 +993,11 @@ public abstract class RMStateStore extends AbstractService {
    * There is no notification of completion for this operation.
    */
   @SuppressWarnings("unchecked")
-  public synchronized void removeApplication(RMApp app) {
+  public void removeApplication(RMApp app) {
     ApplicationStateData appState =
-        ApplicationStateData.newInstance(
-            app.getSubmitTime(), app.getStartTime(),
-            app.getApplicationSubmissionContext(), app.getUser());
+        ApplicationStateData.newInstance(app.getSubmitTime(),
+            app.getStartTime(), app.getApplicationSubmissionContext(),
+            app.getUser(), app.getCallerContext());
     for(RMAppAttempt appAttempt : app.getAppAttempts().values()) {
       appState.attempts.put(appAttempt.getAppAttemptId(), null);
     }
@@ -981,6 +1012,29 @@ public abstract class RMStateStore extends AbstractService {
    */
   protected abstract void removeApplicationStateInternal(
       ApplicationStateData appState) throws Exception;
+
+  /**
+   * Non-blocking API
+   * ResourceManager services call this to remove an attempt from the state
+   * store
+   * This does not block the dispatcher threads
+   * There is no notification of completion for this operation.
+   */
+  @SuppressWarnings("unchecked")
+  public synchronized void removeApplicationAttempt(
+      ApplicationAttemptId applicationAttemptId) {
+    dispatcher.getEventHandler().handle(
+        new RMStateStoreRemoveAppAttemptEvent(applicationAttemptId));
+  }
+
+  /**
+   * Blocking API
+   * Derived classes must implement this method to remove the state of specified
+   * attempt.
+   */
+  protected abstract void removeApplicationAttemptInternal(
+      ApplicationAttemptId attemptId) throws Exception;
+
 
   // TODO: This should eventually become cluster-Id + "AM_RM_TOKEN_SERVICE". See
   // YARN-1779

@@ -76,7 +76,7 @@ public class StorageContainerManager
     BlocksMap containerMap = new BlocksMap(
         LightWeightGSet.computeCapacity(2.0, "BlocksMap"),
         new StorageContainerMap());
-    this.blockManager = new BlockManager(ns, conf, containerMap);
+    this.blockManager = new BlockManager(ns, false, conf, containerMap);
 
     int handlerCount =
         conf.getInt(DFS_NAMENODE_HANDLER_COUNT_KEY,

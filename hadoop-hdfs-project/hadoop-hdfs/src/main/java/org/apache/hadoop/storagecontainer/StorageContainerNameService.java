@@ -18,6 +18,7 @@
 
 package org.apache.hadoop.storagecontainer;
 
+import org.apache.commons.lang.NotImplementedException;
 import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicy;
 import org.apache.hadoop.hdfs.server.blockmanagement.BlockCollection;
@@ -65,31 +66,13 @@ public class StorageContainerNameService implements Namesystem {
   }
 
   @Override
-  public boolean isInStandbyState() {
-    // HA mode is not supported
-    return false;
-  }
-
-  @Override
-  public boolean isGenStampInFuture(Block block) {
-    // HA mode is not supported
-    return false;
-  }
-
-  @Override
   public BlockCollection getBlockCollection(long id) {
     return null;
   }
 
   @Override
-  public void adjustSafeModeBlockTotals(int deltaSafe, int deltaTotal) {
-    // TBD
-  }
-
-  @Override
-  public void checkOperation(NameNode.OperationCategory read)
-    throws StandbyException {
-    // HA mode is not supported
+  public void startSecretManagerIfNecessary() {
+     throw new NotImplementedException();
   }
 
   @Override
@@ -99,8 +82,7 @@ public class StorageContainerNameService implements Namesystem {
   }
 
   @Override
-  public boolean isInSnapshot(BlockInfo blockInfo) {
-    // Snapshots not supported
+  public boolean isInSnapshot(long blockCollectionID) {
     return false;
   }
 
@@ -113,6 +95,15 @@ public class StorageContainerNameService implements Namesystem {
   @Override
   public HAContext getHAContext() {
     return null;
+  }
+
+  /**
+   * @return Whether the namenode is transitioning to active state and is in the
+   * middle of the starting active services.
+   */
+  @Override
+  public boolean inTransitionToActive() {
+    return false;
   }
 
   @Override
@@ -151,11 +142,6 @@ public class StorageContainerNameService implements Namesystem {
   }
 
   @Override
-  public void checkSafeMode() {
-    // TBD
-  }
-
-  @Override
   public boolean isInSafeMode() {
     return false;
   }
@@ -165,13 +151,4 @@ public class StorageContainerNameService implements Namesystem {
     return false;
   }
 
-  @Override
-  public void incrementSafeBlockCount(int replication, BlockInfo storedBlock) {
-  // Do nothing
-  }
-
-  @Override
-  public void decrementSafeBlockCount(BlockInfo b) {
-    // Do nothing
-  }
 }

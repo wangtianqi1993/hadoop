@@ -219,6 +219,20 @@ public class TestRMAdminCLI {
   }
 
   @Test(timeout=500)
+  public void testUpdateNodeResourceWithInvalidValue() throws Exception {
+    String nodeIdStr = "0.0.0.0:0";
+    int memSize = -2048;
+    int cores = 2;
+    String[] args = { "-updateNodeResource", nodeIdStr,
+        Integer.toString(memSize), Integer.toString(cores) };
+    // execution of command line is expected to be failed
+    assertEquals(-1, rmAdminCLI.run(args));
+    // verify admin protocol never calls. 
+    verify(admin,times(0)).updateNodeResource(
+        any(UpdateNodeResourceRequest.class));
+  }
+
+  @Test(timeout=500)
   public void testRefreshNodes() throws Exception {
     String[] args = { "-refreshNodes" };
     assertEquals(0, rmAdminCLI.run(args));
@@ -383,7 +397,7 @@ public class TestRMAdminCLI {
               "[-removeFromClusterNodeLabels <label1,label2,label3>] " +
               "[-replaceLabelsOnNode " +
               "<\"node1[:port]=label1,label2 node2[:port]=label1\">] " +
-              "[-directlyAccessNodeLabelStore]] [-updateNodeResource " +
+              "[-directlyAccessNodeLabelStore] [-updateNodeResource " +
               "[NodeID] [MemSize] [vCores] ([OvercommitTimeout]) " +
               "[-help [cmd]]"));
       assertTrue(dataOut
@@ -473,7 +487,7 @@ public class TestRMAdminCLI {
               + " [username]] [-addToClusterNodeLabels <\"label1(exclusive=true),"
                   + "label2(exclusive=false),label3\">]"
               + " [-removeFromClusterNodeLabels <label1,label2,label3>] [-replaceLabelsOnNode "
-              + "<\"node1[:port]=label1,label2 node2[:port]=label1\">] [-directlyAccessNodeLabelStore]] "
+              + "<\"node1[:port]=label1,label2 node2[:port]=label1\">] [-directlyAccessNodeLabelStore] "
               + "[-updateNodeResource [NodeID] [MemSize] [vCores] ([OvercommitTimeout]) "
               + "[-transitionToActive [--forceactive] <serviceId>] "
               + "[-transitionToStandby <serviceId>] "

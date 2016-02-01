@@ -114,6 +114,7 @@ import org.apache.hadoop.util.DiskChecker.DiskErrorException;
 import org.apache.hadoop.util.DiskChecker.DiskOutOfSpaceException;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.Time;
+import org.apache.hadoop.util.Timer;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -128,6 +129,7 @@ import com.google.common.collect.Sets;
 class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
   static final Log LOG = LogFactory.getLog(FsDatasetImpl.class);
   private final static boolean isNativeIOAvailable;
+  private Timer timer;
   static {
     isNativeIOAvailable = NativeIO.isAvailable();
     if (Path.WINDOWS && !isNativeIOAvailable) {
@@ -431,7 +433,7 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
     for (final NamespaceInfo nsInfo : nsInfos) {
       String bpid = nsInfo.getBlockPoolID();
       try {
-        fsVolume.addBlockPool(bpid, this.conf);
+        fsVolume.addBlockPool(bpid, this.conf, this.timer);
         fsVolume.getVolumeMap(bpid, tempVolumeMap, ramDiskReplicaTracker);
       } catch (IOException e) {
         LOG.warn("Caught exception when adding " + fsVolume +
@@ -468,48 +470,67 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
    * Removes a set of volumes from FsDataset.
    * @param volumesToRemove a set of absolute root path of each volume.
    * @param clearFailure set true to clear failure information.
-   *
-   * DataNode should call this function before calling
-   * {@link DataStorage#removeVolumes(java.util.Collection)}.
    */
   @Override
-  public synchronized void removeVolumes(
-      Set<File> volumesToRemove, boolean clearFailure) {
+  public void removeVolumes(Set<File> volumesToRemove, boolean clearFailure) {
     // Make sure that all volumes are absolute path.
     for (File vol : volumesToRemove) {
       Preconditions.checkArgument(vol.isAbsolute(),
           String.format("%s is not absolute path.", vol.getPath()));
     }
-    for (int idx = 0; idx < dataStorage.getNumStorageDirs(); idx++) {
-      Storage.StorageDirectory sd = dataStorage.getStorageDir(idx);
-      final File absRoot = sd.getRoot().getAbsoluteFile();
-      if (volumesToRemove.contains(absRoot)) {
-        LOG.info("Removing " + absRoot + " from FsDataset.");
 
-        // Disable the volume from the service.
-        asyncDiskService.removeVolume(sd.getCurrentDir());
-        volumes.removeVolume(absRoot, clearFailure);
+    Map<String, List<ReplicaInfo>> blkToInvalidate = new HashMap<>();
+    List<String> storageToRemove = new ArrayList<>();
+    synchronized (this) {
+      for (int idx = 0; idx < dataStorage.getNumStorageDirs(); idx++) {
+        Storage.StorageDirectory sd = dataStorage.getStorageDir(idx);
+        final File absRoot = sd.getRoot().getAbsoluteFile();
+        if (volumesToRemove.contains(absRoot)) {
+          LOG.info("Removing " + absRoot + " from FsDataset.");
 
-        // Removed all replica information for the blocks on the volume. Unlike
-        // updating the volumeMap in addVolume(), this operation does not scan
-        // disks.
-        for (String bpid : volumeMap.getBlockPoolList()) {
-          for (Iterator<ReplicaInfo> it = volumeMap.replicas(bpid).iterator();
-               it.hasNext(); ) {
-            ReplicaInfo block = it.next();
-            final File absBasePath =
-                new File(block.getVolume().getBasePath()).getAbsoluteFile();
-            if (absBasePath.equals(absRoot)) {
-              invalidate(bpid, block);
-              it.remove();
+          // Disable the volume from the service.
+          asyncDiskService.removeVolume(sd.getCurrentDir());
+          volumes.removeVolume(absRoot, clearFailure);
+
+          // Removed all replica information for the blocks on the volume.
+          // Unlike updating the volumeMap in addVolume(), this operation does
+          // not scan disks.
+          for (String bpid : volumeMap.getBlockPoolList()) {
+            List<ReplicaInfo> blocks = new ArrayList<>();
+            for (Iterator<ReplicaInfo> it = volumeMap.replicas(bpid).iterator();
+                 it.hasNext(); ) {
+              ReplicaInfo block = it.next();
+              final File absBasePath =
+                  new File(block.getVolume().getBasePath()).getAbsoluteFile();
+              if (absBasePath.equals(absRoot)) {
+                blocks.add(block);
+                it.remove();
+              }
             }
+            blkToInvalidate.put(bpid, blocks);
           }
-        }
 
-        storageMap.remove(sd.getStorageUuid());
+          storageToRemove.add(sd.getStorageUuid());
+        }
+      }
+      setupAsyncLazyPersistThreads();
+    }
+
+    // Call this outside the lock.
+    for (Map.Entry<String, List<ReplicaInfo>> entry :
+        blkToInvalidate.entrySet()) {
+      String bpid = entry.getKey();
+      List<ReplicaInfo> blocks = entry.getValue();
+      for (ReplicaInfo block : blocks) {
+        invalidate(bpid, block);
       }
     }
-    setupAsyncLazyPersistThreads();
+
+    synchronized (this) {
+      for(String storageUuid : storageToRemove) {
+        storageMap.remove(storageUuid);
+      }
+    }
   }
 
   private StorageType getStorageTypeFromLocations(
@@ -913,8 +934,11 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
           + replicaInfo.getVolume().getStorageType());
     }
 
-    try (FsVolumeReference volumeRef = volumes.getNextVolume(
-        targetStorageType, block.getNumBytes())) {
+    FsVolumeReference volumeRef = null;
+    synchronized (this) {
+      volumeRef = volumes.getNextVolume(targetStorageType, block.getNumBytes());
+    }
+    try {
       File oldBlockFile = replicaInfo.getBlockFile();
       File oldMetaFile = replicaInfo.getMetaFile();
       FsVolumeImpl targetVolume = (FsVolumeImpl) volumeRef.getVolume();
@@ -933,6 +957,10 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
 
       removeOldReplica(replicaInfo, newReplicaInfo, oldBlockFile, oldMetaFile,
           oldBlockFile.length(), oldMetaFile.length(), block.getBlockPoolId());
+    } finally {
+      if (volumeRef != null) {
+        volumeRef.close();
+      }
     }
 
     // Replace the old block if any to reschedule the scanning.
@@ -1107,6 +1135,10 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
       throws IOException {
     // If the block is cached, start uncaching it.
     cacheManager.uncacheBlock(bpid, replicaInfo.getBlockId());
+
+    // If there are any hardlinks to the block, break them.  This ensures we are
+    // not appending to a file that is part of a previous/ directory.
+    replicaInfo.breakHardLinksIfNeeded();
     
     // construct a RBW replica with the new GS
     File blkfile = replicaInfo.getBlockFile();
@@ -1927,15 +1959,11 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
   public void invalidate(String bpid, ReplicaInfo block) {
     // If a DFSClient has the replica in its cache of short-circuit file
     // descriptors (and the client is using ShortCircuitShm), invalidate it.
-    // The short-circuit registry is null in the unit tests, because the
-    // datanode is mock object.
-    if (datanode.getShortCircuitRegistry() != null) {
-      datanode.getShortCircuitRegistry().processBlockInvalidation(
-          new ExtendedBlockId(block.getBlockId(), bpid));
+    datanode.getShortCircuitRegistry().processBlockInvalidation(
+        new ExtendedBlockId(block.getBlockId(), bpid));
 
-      // If the block is cached, start uncaching it.
-      cacheManager.uncacheBlock(bpid, block.getBlockId());
-    }
+    // If the block is cached, start uncaching it.
+    cacheManager.uncacheBlock(bpid, block.getBlockId());
 
     datanode.notifyNamenodeDeletedBlock(new ExtendedBlock(bpid, block),
         block.getStorageUuid());
@@ -2481,6 +2509,7 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
           + ", rur=" + rur);
     }
     if (rur.getNumBytes() > newlength) {
+      rur.breakHardLinksIfNeeded();
       truncateBlock(blockFile, metaFile, rur.getNumBytes(), newlength);
       if(!copyOnTruncate) {
         // update RUR with the new length
@@ -2488,8 +2517,14 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
       } else {
         // Copying block to a new block with new blockId.
         // Not truncating original block.
+        FsVolumeSpi volume = rur.getVolume();
+        String blockPath = blockFile.getAbsolutePath();
+        String volumePath = volume.getBasePath();
+        assert blockPath.startsWith(volumePath) :
+            "New block file: " + blockPath + " must be on " +
+                "same volume as recovery replica: " + volumePath;
         ReplicaBeingWritten newReplicaInfo = new ReplicaBeingWritten(
-            newBlockId, recoveryId, rur.getVolume(), blockFile.getParentFile(),
+            newBlockId, recoveryId, volume, blockFile.getParentFile(),
             newlength);
         newReplicaInfo.setNumBytes(newlength);
         volumeMap.add(bpid, newReplicaInfo);
@@ -2505,17 +2540,14 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
       ReplicaUnderRecovery replicaInfo, String bpid, long newBlkId, long newGS)
       throws IOException {
     String blockFileName = Block.BLOCK_FILE_PREFIX + newBlkId;
-    try (FsVolumeReference ref = volumes.getNextVolume(
-        replicaInfo.getVolume().getStorageType(), replicaInfo.getNumBytes())) {
-      FsVolumeImpl v = (FsVolumeImpl) ref.getVolume();
-      final File tmpDir = v.getBlockPoolSlice(bpid).getTmpDir();
-      final File destDir = DatanodeUtil.idToBlockDir(tmpDir, newBlkId);
-      final File dstBlockFile = new File(destDir, blockFileName);
-      final File dstMetaFile = FsDatasetUtil.getMetaFile(dstBlockFile, newGS);
-      return copyBlockFiles(replicaInfo.getMetaFile(),
-          replicaInfo.getBlockFile(),
-          dstMetaFile, dstBlockFile, true, smallBufferSize, conf);
-    }
+    FsVolumeImpl v = (FsVolumeImpl) replicaInfo.getVolume();
+    final File tmpDir = v.getBlockPoolSlice(bpid).getTmpDir();
+    final File destDir = DatanodeUtil.idToBlockDir(tmpDir, newBlkId);
+    final File dstBlockFile = new File(destDir, blockFileName);
+    final File dstMetaFile = FsDatasetUtil.getMetaFile(dstBlockFile, newGS);
+    return copyBlockFiles(replicaInfo.getMetaFile(),
+        replicaInfo.getBlockFile(),
+        dstMetaFile, dstBlockFile, true, smallBufferSize, conf);
   }
 
   @Override // FsDatasetSpi
@@ -3059,6 +3091,11 @@ class FsDatasetImpl implements FsDatasetSpi<FsVolumeImpl> {
     bytesNeeded = cacheManager.roundUpPageSize(bytesNeeded);
     evictLazyPersistBlocks(bytesNeeded);
     return cacheManager.reserve(bytesNeeded) > 0;
+  }
+
+  @VisibleForTesting
+  public void setTimer(Timer newTimer) {
+    this.timer = newTimer;
   }
 }
 

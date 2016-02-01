@@ -1128,6 +1128,18 @@
   </property>
 
   <property>
+    <description>Generate additional logs about container launches.
+    Currently, this creates a copy of the launch script and lists the
+    directory contents of the container work dir. When listing directory
+    contents, we follow symlinks to a max-depth of 5(including symlinks
+    which point to outside the container work dir) which may lead to a
+    slowness in launching containers.
+    </description>
+    <name>yarn.nodemanager.log-container-debug-info.enabled</name>
+    <value>false</value>
+  </property>
+
+  <property>
     <description>Amount of physical memory, in MB, that can be allocated 
     for containers. If set to -1 and
     yarn.nodemanager.resource.detect-hardware-capabilities is true, it is
@@ -1551,6 +1563,26 @@
 
   <property>
     <description>
+      Max time to wait for NM to connect to RM.
+      When not set, proxy will fall back to use value of
+      yarn.resourcemanager.connect.max-wait.ms.
+    </description>
+    <name>yarn.nodemanager.resourcemanager.connect.max-wait.ms</name>
+    <value></value>
+  </property>
+
+  <property>
+    <description>
+      Time interval between each NM attempt to connect to RM.
+      When not set, proxy will fall back to use value of
+      yarn.resourcemanager.connect.retry-interval.ms.
+    </description>
+    <name>yarn.nodemanager.resourcemanager.connect.retry-interval.ms</name>
+    <value></value>
+  </property>
+
+  <property>
+    <description>
       Maximum number of proxy connections to cache for node managers. If set
       to a value greater than zero then the cache is enabled and the NMClient
       and MRAppMaster will cache the specified number of node manager proxies.
@@ -1746,6 +1778,20 @@
   <!-- Timeline Service Configuration -->
 
   <property>
+    <description>Indicate what is the current version of the running
+    timeline service. For example, if "yarn.timeline-service.version" is 1.5,
+    and "yarn.timeline-service.enabled" is true, it means the cluster will and
+    should bring up the timeline service v.1.5.
+    On the client side, if the client uses the same version of timeline service,
+    it should succeed. If the client chooses to use a smaller version in spite of this,
+    then depending on how robust the compatibility story is between versions,
+    the results may vary.
+    </description>
+    <name>yarn.timeline-service.version</name>
+    <value>1.0f</value>
+  </property>
+
+  <property>
     <description>Indicate to clients whether timeline service is enabled or not.
     If enabled, clients will put entities and events to the timeline server.
     </description>
@@ -1930,6 +1976,72 @@
     <description>Store file name for leveldb state store.</description>
     <name>yarn.timeline-service.leveldb-state-store.path</name>
     <value>${hadoop.tmp.dir}/yarn/timeline</value>
+  </property>
+
+  <!-- Timeline Service v1.5 Configuration -->
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.active-dir</name>
+    <value>/tmp/entity-file-history/active</value>
+    <description>HDFS path to store active application’s timeline data</description>
+  </property>
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.done-dir</name>
+    <value>/tmp/entity-file-history/done/</value>
+    <description>HDFS path to store done application’s timeline data</description>
+  </property>
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.group-id-plugin-classes</name>
+    <value></value>
+    <description>
+      Plugins that can translate a timeline entity read request into
+      a list of timeline entity group ids, separated by commas.
+    </description>
+  </property>
+
+   <property>
+     <name>yarn.timeline-service.entity-group-fs-store.summary-store</name>
+     <description>Summary storage for ATS v1.5</description>
+     <value>org.apache.hadoop.yarn.server.timeline.LeveldbTimelineStore</value>
+  </property>
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.scan-interval-seconds</name>
+    <description>
+      Scan interval for ATS v1.5 entity group file system storage reader.This
+      value controls how frequent the reader will scan the HDFS active directory
+      for application status.
+    </description>
+    <value>60</value>
+  </property>
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.cleaner-interval-seconds</name>
+    <description>
+      Scan interval for ATS v1.5 entity group file system storage cleaner.This
+      value controls how frequent the reader will scan the HDFS done directory
+      for stale application data.
+    </description>
+    <value>3600</value>
+  </property>
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.retain-seconds</name>
+    <description>
+      How long the ATS v1.5 entity group file system storage will keep an
+      application's data in the done directory.
+    </description>
+    <value>604800</value>
+  </property>
+
+  <property>
+    <name>yarn.timeline-service.entity-group-fs-store.leveldb-cache-read-cache-size</name>
+    <description>
+      Read cache size for the leveldb cache storage in ATS v1.5 plugin storage.
+    </description>
+    <value>10485760</value>
   </property>
 
   <!--  Shared Cache Configuration -->
@@ -2413,6 +2525,29 @@
     <value>org.apache.hadoop.yarn.server.nodemanager.amrmproxy.DefaultRequestInterceptor</value>
   </property>
 
+  <property>
+    <description>
+    Error filename pattern, to identify the file in the container's
+    Log directory which contain the container's error log. As error file
+    redirection is done by client/AM and yarn will not be aware of the error
+    file name. YARN uses this pattern to identify the error file and tail
+    the error log as diagnostics when the container execution returns non zero
+    value. Filename patterns are case sensitive and should match the
+    specifications of FileSystem.globStatus(Path) api. If multiple filenames
+    matches the pattern, first file matching the pattern will be picked.
+    </description>
+    <name>yarn.nodemanager.container.stderr.pattern</name>
+    <value>{*stderr*,*STDERR*}</value>
+  </property>
+
+  <property>
+    <description>
+    Size of the container error file which needs to be tailed, in bytes.
+    </description>
+    <name>yarn.nodemanager.container.stderr.tail.bytes </name>
+    <value>4096</value>
+  </property>
+
  <property>
     <description>
     Enable/disable blacklisting of hosts for AM based on AM failures on those
@@ -2430,5 +2565,13 @@
     </description>
     <name>yarn.am.blacklisting.disable-failure-threshold</name>
     <value>0.8f</value>
+  </property>
+
+  <property>
+    <description>
+    Choose different implementation of node label's storage
+    </description>
+    <name>yarn.node-labels.fs-store.impl.class</name>
+    <value>org.apache.hadoop.yarn.nodelabels.FileSystemNodeLabelsStore</value>
   </property>
 </configuration>

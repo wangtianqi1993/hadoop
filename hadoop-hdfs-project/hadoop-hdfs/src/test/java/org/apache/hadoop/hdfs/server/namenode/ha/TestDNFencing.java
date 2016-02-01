@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -117,6 +118,7 @@ public class TestDNFencing {
       banner("Shutting down cluster. NN2 metadata:");
       doMetasave(nn2);
       cluster.shutdown();
+      cluster = null;
     }
   }
   
@@ -456,6 +458,7 @@ public class TestDNFencing {
       numQueued += numDN * 2; // RBW messages, see comments in case 1
     } finally {
       IOUtils.closeStream(out);
+      cluster.triggerHeartbeats();
       numQueued += numDN; // blockReceived
     }
     assertEquals(numQueued, cluster.getNameNode(1).getNamesystem().
@@ -632,7 +635,8 @@ public class TestDNFencing {
     public DatanodeStorageInfo chooseReplicaToDelete(
         Collection<DatanodeStorageInfo> moreThanOne,
         Collection<DatanodeStorageInfo> exactlyOne,
-        List<StorageType> excessTypes) {
+        List<StorageType> excessTypes,
+        Map<String, List<DatanodeStorageInfo>> rackMap) {
 
       Collection<DatanodeStorageInfo> chooseFrom = !moreThanOne.isEmpty() ?
           moreThanOne : exactlyOne;

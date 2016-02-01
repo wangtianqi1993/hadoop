@@ -32,7 +32,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Joiner;
-import org.apache.commons.logging.Log;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.ha.HAServiceProtocol.HAServiceState;
 import org.apache.hadoop.hdfs.client.BlockReportOptions;
@@ -68,6 +67,7 @@ import org.apache.hadoop.util.VersionUtil;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
+import org.slf4j.Logger;
 
 /**
  * A thread per active or standby namenode to perform:
@@ -81,7 +81,7 @@ import com.google.common.collect.Maps;
 @InterfaceAudience.Private
 class BPServiceActor implements Runnable {
   
-  static final Log LOG = DataNode.LOG;
+  static final Logger LOG = DataNode.LOG;
   final InetSocketAddress nnAddr;
   HAServiceState state;
 
@@ -129,6 +129,10 @@ class BPServiceActor implements Runnable {
     this.dnConf = dn.getDnConf();
     prevBlockReportId = ThreadLocalRandom.current().nextLong();
     scheduler = new Scheduler(dnConf.heartBeatInterval, dnConf.blockReportInterval);
+  }
+
+  public DatanodeRegistration getBpRegistration() {
+    return bpRegistration;
   }
 
   boolean isAlive() {
@@ -607,7 +611,7 @@ class BPServiceActor implements Runnable {
   private synchronized void cleanUp() {
     
     shouldServiceRun = false;
-    IOUtils.cleanup(LOG, bpNamenode);
+    IOUtils.cleanup(null, bpNamenode);
     bpos.shutdownActor(this);
   }
 
@@ -841,7 +845,7 @@ class BPServiceActor implements Runnable {
             sleepAndLogInterrupts(5000, "initializing");
           } else {
             runningState = RunningState.FAILED;
-            LOG.fatal("Initialization failed for " + this + ". Exiting. ", ioe);
+            LOG.error("Initialization failed for " + this + ". Exiting. ", ioe);
             return;
           }
         }

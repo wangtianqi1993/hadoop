@@ -215,7 +215,7 @@ public class Client {
    * @param conf Configuration
    * @param pingInterval the ping interval
    */
-  final public static void setPingInterval(Configuration conf, int pingInterval) {
+  static final void setPingInterval(Configuration conf, int pingInterval) {
     conf.setInt(CommonConfigurationKeys.IPC_PING_INTERVAL_KEY, pingInterval);
   }
 
@@ -226,7 +226,7 @@ public class Client {
    * @param conf Configuration
    * @return the ping interval
    */
-  final public static int getPingInterval(Configuration conf) {
+  static final int getPingInterval(Configuration conf) {
     return conf.getInt(CommonConfigurationKeys.IPC_PING_INTERVAL_KEY,
         CommonConfigurationKeys.IPC_PING_INTERVAL_DEFAULT);
   }
@@ -625,6 +625,7 @@ public class Client {
               // If host name is a valid local address then bind socket to it
               InetAddress localAddr = NetUtils.getLocalInetAddress(host);
               if (localAddr != null) {
+                this.socket.setReuseAddress(true);
                 this.socket.bind(new InetSocketAddress(localAddr, 0));
               }
             }

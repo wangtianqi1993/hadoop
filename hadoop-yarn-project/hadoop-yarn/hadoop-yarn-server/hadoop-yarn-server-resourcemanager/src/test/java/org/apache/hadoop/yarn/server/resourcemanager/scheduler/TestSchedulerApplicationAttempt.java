@@ -17,10 +17,9 @@
  */
 package org.apache.hadoop.yarn.server.resourcemanager.scheduler;
 
-import org.apache.hadoop.yarn.api.records.*;
-import org.apache.hadoop.yarn.server.resourcemanager.RMContext;
 import static org.junit.Assert.assertEquals;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -28,6 +27,17 @@ import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
+import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
+import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.Container;
+import org.apache.hadoop.yarn.api.records.ContainerId;
+import org.apache.hadoop.yarn.api.records.NodeId;
+import org.apache.hadoop.yarn.api.records.Priority;
+import org.apache.hadoop.yarn.api.records.QueueInfo;
+import org.apache.hadoop.yarn.api.records.QueueState;
+import org.apache.hadoop.yarn.api.records.Resource;
+import org.apache.hadoop.yarn.api.records.ResourceRequest;
+import org.apache.hadoop.yarn.server.resourcemanager.RMContext;
 import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.RMContainer;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator;
@@ -149,7 +159,8 @@ public class TestSchedulerApplicationAttempt {
 
   private Queue createQueue(String name, Queue parent, float capacity) {
     QueueMetrics metrics = QueueMetrics.forQueue(name, parent, false, conf);
-    QueueInfo queueInfo = QueueInfo.newInstance(name, capacity, 1.0f, 0, null, null, QueueState.RUNNING, null, "", null);
+    QueueInfo queueInfo = QueueInfo.newInstance(name, capacity, 1.0f, 0, null,
+        null, QueueState.RUNNING, null, "", null, false);
     ActiveUsersManager activeUsersManager = new ActiveUsersManager(metrics);
     Queue queue = mock(Queue.class);
     when(queue.getMetrics()).thenReturn(metrics);
@@ -210,5 +221,54 @@ public class TestSchedulerApplicationAttempt {
         0.01f);
     assertEquals(60.0f,
         app.getResourceUsageReport().getClusterUsagePercentage(), 0.01f);
+  }
+
+  @Test
+  public void testAppPercentagesOnswitch() throws Exception {
+    FifoScheduler scheduler = mock(FifoScheduler.class);
+    when(scheduler.getClusterResource()).thenReturn(Resource.newInstance(0, 0));
+    when(scheduler.getResourceCalculator())
+        .thenReturn(new DefaultResourceCalculator());
+
+    ApplicationAttemptId appAttId = createAppAttemptId(0, 0);
+    RMContext rmContext = mock(RMContext.class);
+    when(rmContext.getEpoch()).thenReturn(3L);
+    when(rmContext.getScheduler()).thenReturn(scheduler);
+
+    final String user = "user1";
+    Queue queue = createQueue("test", null);
+    SchedulerApplicationAttempt app = new SchedulerApplicationAttempt(appAttId,
+        user, queue, queue.getActiveUsersManager(), rmContext);
+
+    // Resource request
+    Resource requestedResource = Resource.newInstance(1536, 2);
+    app.attemptResourceUsage.incUsed(requestedResource);
+
+    assertEquals(0.0f, app.getResourceUsageReport().getQueueUsagePercentage(),
+        0.0f);
+    assertEquals(0.0f, app.getResourceUsageReport().getClusterUsagePercentage(),
+        0.0f);
+  }
+
+  @Test
+  public void testSchedulingOpportunityOverflow() throws Exception {
+    ApplicationAttemptId attemptId = createAppAttemptId(0, 0);
+    Queue queue = createQueue("test", null);
+    RMContext rmContext = mock(RMContext.class);
+    when(rmContext.getEpoch()).thenReturn(3L);
+    SchedulerApplicationAttempt app = new SchedulerApplicationAttempt(
+        attemptId, "user", queue, queue.getActiveUsersManager(), rmContext);
+    Priority priority = Priority.newInstance(1);
+    assertEquals(0, app.getSchedulingOpportunities(priority));
+    app.addSchedulingOpportunity(priority);
+    assertEquals(1, app.getSchedulingOpportunities(priority));
+    // verify the count is capped at MAX_VALUE and does not overflow
+    app.setSchedulingOpportunities(priority, Integer.MAX_VALUE - 1);
+    assertEquals(Integer.MAX_VALUE - 1,
+        app.getSchedulingOpportunities(priority));
+    app.addSchedulingOpportunity(priority);
+    assertEquals(Integer.MAX_VALUE, app.getSchedulingOpportunities(priority));
+    app.addSchedulingOpportunity(priority);
+    assertEquals(Integer.MAX_VALUE, app.getSchedulingOpportunities(priority));
   }
 }

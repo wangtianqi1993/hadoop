@@ -11,7 +11,6 @@ Requirements:
 * CMake 2.6 or newer (if compiling native code), must be 3.0 or newer on Mac
 * Zlib devel (if compiling native code)
 * openssl devel (if compiling native hadoop-pipes and to get the best HDFS encryption performance)
-* Jansson C XML parsing library (if compiling libwebhdfs)
 * Linux FUSE (Filesystem in Userspace) version 2.6 or above (if compiling fuse_dfs)
 * Internet connection for first build (to fetch all Maven and Hadoop dependencies)
 * python (for releasedocs)
@@ -40,7 +39,7 @@ and all required tools for testing and building have been installed and configur
 
 Note that from within this docker environment you ONLY have access to the Hadoop source
 tree from where you started. So if you need to run
-    dev-support/test-patch.sh /path/to/my.patch
+    dev-support/bin/test-patch /path/to/my.patch
 then the patch must be placed inside the hadoop source tree.
 
 Known issues:
@@ -150,7 +149,8 @@ Maven build goals:
     installed snappy using a package manager.
   * Use -Dbundle.snappy to copy the contents of the snappy.lib directory into
     the final tar file. This option requires that -Dsnappy.lib is also given,
-    and it ignores the -Dsnappy.prefix option.
+    and it ignores the -Dsnappy.prefix option. If -Dsnappy.lib isn't given, the
+    bundling and building will fail.
 
  OpenSSL build options:
 
@@ -171,7 +171,8 @@ Maven build goals:
     installed openssl using a package manager.
   * Use -Dbundle.openssl to copy the contents of the openssl.lib directory into
     the final tar file. This option requires that -Dopenssl.lib is also given,
-    and it ignores the -Dopenssl.prefix option.
+    and it ignores the -Dopenssl.prefix option. If -Dopenssl.lib isn't given, the
+    bundling and building will fail.
 
    Tests options:
 
@@ -180,6 +181,10 @@ Maven build goals:
   * -Dtest=<TESTCLASSNAME>,<TESTCLASSNAME#METHODNAME>,....
   * -Dtest.exclude=<TESTCLASSNAME>
   * -Dtest.exclude.pattern=**/<TESTCLASSNAME1>.java,**/<TESTCLASSNAME2>.java
+  * To run all native unit tests, use: mvn test -Pnative -Dtest=allNative
+  * To run a specific native unit test, use: mvn test -Pnative -Dtest=<test>
+  For example, to run test_bulk_crc32, you would use:
+  mvn test -Pnative -Dtest=test_bulk_crc32
 
  Intel ISA-L build options:
 
@@ -202,7 +207,8 @@ Maven build goals:
     files.
   * Use -Dbundle.isal to copy the contents of the isal.lib directory into
     the final tar file. This option requires that -Disal.lib is also given,
-    and it ignores the -Disal.prefix option.
+    and it ignores the -Disal.prefix option. If -Disal.lib isn't given, the
+    bundling and building will fail.
 
 ----------------------------------------------------------------------------------
 Building components separately

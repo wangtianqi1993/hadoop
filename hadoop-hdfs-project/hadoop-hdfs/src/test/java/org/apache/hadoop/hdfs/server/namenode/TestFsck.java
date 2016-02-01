@@ -652,14 +652,12 @@ public class TestFsck {
   public void testFsckOpenECFiles() throws Exception {
     DFSTestUtil util = new DFSTestUtil.Builder().setName("TestFsckECFile").
         setNumFiles(4).build();
-    MiniDFSCluster cluster = null;
+    Configuration conf = new HdfsConfiguration();
+    conf.setLong(DFSConfigKeys.DFS_BLOCKREPORT_INTERVAL_MSEC_KEY, 10000L);
+    MiniDFSCluster cluster = new MiniDFSCluster.Builder(conf).numDataNodes(10)
+        .build();
     FileSystem fs = null;
-    String outStr;
     try {
-      Configuration conf = new HdfsConfiguration();
-      conf.setLong(DFSConfigKeys.DFS_BLOCKREPORT_INTERVAL_MSEC_KEY, 10000L);
-      cluster = new MiniDFSCluster.Builder(conf).numDataNodes(10).build();
-      cluster.getFileSystem().getClient().setErasureCodingPolicy("/", null);
       String topDir = "/myDir";
       byte[] randomBytes = new byte[3000000];
       int seed = 42;
@@ -667,7 +665,11 @@ public class TestFsck {
       cluster.waitActive();
       fs = cluster.getFileSystem();
       util.createFiles(fs, topDir);
+      // set topDir to EC when it has replicated files
+      cluster.getFileSystem().getClient().setErasureCodingPolicy(topDir, null);
 
+      // create a new file under topDir
+      DFSTestUtil.createFile(fs, new Path(topDir, "ecFile"), 1024, (short) 1, 0L);
       // Open a EC file for writing and do not close for now
       Path openFile = new Path(topDir + "/openECFile");
       FSDataOutputStream out = fs.create(openFile);
@@ -677,8 +679,11 @@ public class TestFsck {
         writeCount++;
       }
 
+      // make sure the fsck can correctly handle mixed ec/replicated files
+      runFsck(conf, 0, true, topDir, "-files", "-blocks", "-openforwrite");
+
       // We expect the filesystem to be HEALTHY and show one open file
-      outStr = runFsck(conf, 0, true, openFile.toString(), "-files",
+      String outStr = runFsck(conf, 0, true, openFile.toString(), "-files",
           "-blocks", "-openforwrite");
       assertTrue(outStr.contains(NamenodeFsck.HEALTHY_STATUS));
       assertTrue(outStr.contains("OPENFORWRITE"));
@@ -913,7 +918,7 @@ public class TestFsck {
       try {
         fsn.writeLock();
         BlockInfo bi = bm.getStoredBlock(eb.getLocalBlock());
-        bc = bm.getBlockCollection(bi);
+        bc = fsn.getBlockCollection(bi);
       } finally {
         fsn.writeUnlock();
       }
@@ -1484,7 +1489,7 @@ public class TestFsck {
       try {
         fsn.writeLock();
         BlockInfo bi = bm.getStoredBlock(eb.getLocalBlock());
-        bc = bm.getBlockCollection(bi);
+        bc = fsn.getBlockCollection(bi);
       } finally {
         fsn.writeUnlock();
       }
@@ -1699,7 +1704,7 @@ public class TestFsck {
       try {
         fsn.writeLock();
         BlockInfo bi = bm.getStoredBlock(eb.getLocalBlock());
-        bc = bm.getBlockCollection(bi);
+        bc = fsn.getBlockCollection(bi);
       } finally {
         fsn.writeUnlock();
       }
