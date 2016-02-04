@@ -164,6 +164,9 @@ Branch YARN-2928: Timeline Server Next Generation: Phase 1
     YARN-3586. RM to only get back addresses of Collectors that NM needs to know.
     (Junping Du via varunsaxena)
 
+    YARN-4446. Refactor reader API for better extensibility (Varun Saxena via
+    sjlee)
+
   OPTIMIZATIONS
 
   BUG FIXES
