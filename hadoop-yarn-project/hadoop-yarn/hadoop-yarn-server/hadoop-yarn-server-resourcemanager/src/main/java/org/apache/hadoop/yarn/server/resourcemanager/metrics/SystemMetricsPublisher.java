@@ -24,6 +24,9 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttempt;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.attempt.RMAppAttemptState;
 import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.RMContainer;
 
+/**
+ * Interface used to publish app/container events to timelineservice.
+ */
 public interface SystemMetricsPublisher {
 
   void appCreated(RMApp app, long createdTime);

@@ -25,7 +25,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.RMContainer;
 
 /**
  * This class does nothing when any of the methods are invoked on
- * SystemMetricsPublisher
+ * SystemMetricsPublisher.
  */
 public class NoOpSystemMetricPublisher implements SystemMetricsPublisher{
 

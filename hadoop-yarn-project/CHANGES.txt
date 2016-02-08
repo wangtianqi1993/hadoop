@@ -229,6 +229,9 @@ Branch YARN-2928: Timeline Server Next Generation: Phase 1
     YARN-4644. TestRMRestart fails and findbugs issue in YARN-2928 branch.
     (Varun Saxena via Naganarasimha G R)
 
+    YARN-4409. Fix javadoc and checkstyle issues in timelineservice code (Varun
+    Saxena via sjlee)
+
 Trunk - Unreleased
 
   INCOMPATIBLE CHANGES

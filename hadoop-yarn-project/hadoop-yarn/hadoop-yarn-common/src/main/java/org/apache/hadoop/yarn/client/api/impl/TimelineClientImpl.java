@@ -390,8 +390,8 @@ public class TimelineClientImpl extends TimelineClient {
       entitiesContainer.addEntity(entity);
     }
     MultivaluedMap<String, String> params = new MultivaluedMapImpl();
-    if (contextAppId != null) {
-      params.add("appid", contextAppId.toString());
+    if (getContextAppId() != null) {
+      params.add("appid", getContextAppId().toString());
     }
     if (async) {
       params.add("async", Boolean.TRUE.toString());
@@ -429,8 +429,7 @@ public class TimelineClientImpl extends TimelineClient {
         URI uri = constructResURI(getConfig(), timelineServiceAddress, true);
         putObjects(uri, path, params, obj);
         needRetry = false;
-      }
-      catch (Exception e) {
+      } catch (Exception e) {
         // TODO only handle exception for timelineServiceAddress being updated.
         // skip retry for other exceptions.
         checkRetryWithSleep(retries, e);
@@ -453,10 +452,9 @@ public class TimelineClientImpl extends TimelineClient {
         Thread.currentThread().interrupt();
       }
     } else {
-      LOG.error(
-        "TimelineClient has reached to max retry times :" +
-        this.maxServiceRetries + " for service address: " +
-        timelineServiceAddress);
+      LOG.error("TimelineClient has reached to max retry times :" +
+          this.maxServiceRetries + " for service address: " +
+          timelineServiceAddress);
       if (e instanceof YarnException) {
         throw (YarnException)e;
       } else if (e instanceof IOException) {
@@ -634,7 +632,7 @@ public class TimelineClientImpl extends TimelineClient {
   }
 
   /**
-   * Poll TimelineServiceAddress for maximum of retries times if it is null
+   * Poll TimelineServiceAddress for maximum of retries times if it is null.
    * @param retries
    * @return the left retry times
    */

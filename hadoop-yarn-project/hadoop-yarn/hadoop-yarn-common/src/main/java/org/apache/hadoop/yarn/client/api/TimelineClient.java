@@ -53,7 +53,7 @@ public abstract class TimelineClient extends AbstractService {
    * construct and initialize a timeline client if the following operations are
    * supposed to be conducted by that user.
    */
-  protected ApplicationId contextAppId;
+  private ApplicationId contextAppId;
 
   /**
    * Creates an instance of the timeline v.1.x client.
@@ -76,7 +76,7 @@ public abstract class TimelineClient extends AbstractService {
   @Private
   protected TimelineClient(String name, ApplicationId appId) {
     super(name);
-    contextAppId = appId;
+    setContextAppId(appId);
   }
 
   /**
@@ -240,11 +240,18 @@ public abstract class TimelineClient extends AbstractService {
 
   /**
    * <p>
-   * Update the timeline service address where the request will be sent to
+   * Update the timeline service address where the request will be sent to.
    * </p>
    * @param address
    *          the timeline service address
    */
   public abstract void setTimelineServiceAddress(String address);
 
+  protected ApplicationId getContextAppId() {
+    return contextAppId;
+  }
+
+  protected void setContextAppId(ApplicationId appId) {
+    this.contextAppId = appId;
+  }
 }
