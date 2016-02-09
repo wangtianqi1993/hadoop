@@ -167,6 +167,9 @@ Branch YARN-2928: Timeline Server Next Generation: Phase 1
     YARN-4446. Refactor reader API for better extensibility (Varun Saxena via
     sjlee)
 
+    YARN-3367. Replace starting a separate thread for post entity with event
+    loop in TimelineClient (Naganarasimha G R via sjlee)
+
   OPTIMIZATIONS
 
   BUG FIXES

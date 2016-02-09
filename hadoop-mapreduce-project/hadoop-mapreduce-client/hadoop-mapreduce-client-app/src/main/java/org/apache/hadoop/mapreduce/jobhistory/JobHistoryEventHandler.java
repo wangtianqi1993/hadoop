@@ -27,10 +27,7 @@ import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -75,7 +72,6 @@ import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.exceptions.YarnRuntimeException;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 /**
  * The job history events get routed to this class. This class writes the Job
  * history events to the DFS directly into a staging dir and then moved to a
@@ -128,10 +124,6 @@ public class JobHistoryEventHandler extends AbstractService
   protected TimelineClient timelineClient;
   
   private boolean timelineServiceV2Enabled = false;
-
-  // For posting entities in new timeline service in a non-blocking way
-  // TODO YARN-3367 replace with event loop in TimelineClient.
-  private ExecutorService threadPool;
 
   private static String MAPREDUCE_JOB_ENTITY_TYPE = "MAPREDUCE_JOB";
   private static String MAPREDUCE_TASK_ENTITY_TYPE = "MAPREDUCE_TASK";
@@ -272,10 +264,6 @@ public class JobHistoryEventHandler extends AbstractService
             YarnConfiguration.timelineServiceV2Enabled(conf);
         LOG.info("Timeline service is enabled; version: " +
             YarnConfiguration.getTimelineServiceVersion(conf));
-        if (timelineServiceV2Enabled) {
-          // initialize the thread pool for v.2 timeline service
-          threadPool = createThreadPool();
-        }
       } else {
         LOG.info("Timeline service is not enabled");
       }
@@ -449,34 +437,8 @@ public class JobHistoryEventHandler extends AbstractService
     if (timelineClient != null) {
       timelineClient.stop();
     }
-    if (threadPool != null) {
-      shutdownAndAwaitTermination();
-    }
     LOG.info("Stopped JobHistoryEventHandler. super.stop()");
     super.serviceStop();
-  }
-  
-  // TODO remove threadPool after adding non-blocking call in TimelineClient
-  private ExecutorService createThreadPool() {
-    return Executors.newCachedThreadPool(
-      new ThreadFactoryBuilder().setNameFormat("TimelineService #%d")
-      .build());
-  }
-
-  private void shutdownAndAwaitTermination() {
-    threadPool.shutdown();
-    try {
-      if (!threadPool.awaitTermination(60, TimeUnit.SECONDS)) {
-        threadPool.shutdownNow(); 
-        if (!threadPool.awaitTermination(60, TimeUnit.SECONDS)) {
-          LOG.error("ThreadPool did not terminate");
-        }
-      }
-    } catch (InterruptedException ie) {
-      threadPool.shutdownNow();
-      // Preserve interrupt status
-      Thread.currentThread().interrupt();
-    }
   }
 
   protected EventWriter createEventWriter(Path historyFilePath)
@@ -1072,21 +1034,6 @@ public class JobHistoryEventHandler extends AbstractService
     }
   }
   
-  private void putEntityWithoutBlocking(final TimelineClient client,
-      final org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity entity) {
-    Runnable publishWrapper = new Runnable() {
-      public void run() {
-        try {
-          client.putEntities(entity);
-        } catch (IOException|YarnException e) {
-          LOG.error("putEntityNonBlocking get failed: " + e);
-          throw new RuntimeException(e.toString());
-        }
-      }
-    };
-    threadPool.execute(publishWrapper);
-  }
-  
   // create JobEntity from HistoryEvent with adding other info, like: 
   // jobId, timestamp and entityType.
   private org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity 
@@ -1247,7 +1194,13 @@ public class JobHistoryEventHandler extends AbstractService
             taskId, setCreatedTime);
       }
     }
-    putEntityWithoutBlocking(timelineClient, tEntity);
+    try {
+      timelineClient.putEntitiesAsync(tEntity);
+    } catch (IOException | YarnException e) {
+      LOG.error("Failed to process Event " + event.getEventType()
+          + " for the job : " + jobId, e);
+    }
+
   }
 
   private void setSummarySlotSeconds(JobSummary summary, Counters allCounters) {
