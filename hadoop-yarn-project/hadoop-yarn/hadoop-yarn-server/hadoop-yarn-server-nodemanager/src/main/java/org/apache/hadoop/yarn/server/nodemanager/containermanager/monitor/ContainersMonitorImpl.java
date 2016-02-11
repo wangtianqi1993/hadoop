@@ -34,6 +34,7 @@ import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.event.AsyncDispatcher;
 import org.apache.hadoop.yarn.event.Dispatcher;
+import org.apache.hadoop.yarn.server.api.records.QueuedContainersStatus;
 import org.apache.hadoop.yarn.api.records.ResourceUtilization;
 import org.apache.hadoop.yarn.server.nodemanager.ContainerExecutor;
 import org.apache.hadoop.yarn.server.nodemanager.Context;
@@ -84,6 +85,7 @@ public class ContainersMonitorImpl extends AbstractService implements
   private ResourceUtilization containersUtilization;
 
   private volatile boolean stopped = false;
+  private QueuedContainersStatus queuedContainersStatus;
 
   public ContainersMonitorImpl(ContainerExecutor exec,
       AsyncDispatcher dispatcher, Context context) {
@@ -96,6 +98,7 @@ public class ContainersMonitorImpl extends AbstractService implements
     this.monitoringThread = new MonitoringThread();
 
     this.containersUtilization = ResourceUtilization.newInstance(0, 0, 0.0f);
+    this.queuedContainersStatus = QueuedContainersStatus.newInstance();
   }
 
   @Override
@@ -695,6 +698,15 @@ public class ContainersMonitorImpl extends AbstractService implements
 
   public void setContainersUtilization(ResourceUtilization utilization) {
     this.containersUtilization = utilization;
+  }
+
+  public QueuedContainersStatus getQueuedContainersStatus() {
+    return this.queuedContainersStatus;
+  }
+
+  public void setQueuedContainersStatus(QueuedContainersStatus
+      queuedContainersStatus) {
+    this.queuedContainersStatus = queuedContainersStatus;
   }
 
   @Override
