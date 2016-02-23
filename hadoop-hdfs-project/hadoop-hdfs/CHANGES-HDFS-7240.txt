@@ -36,3 +36,5 @@
     HDFS-8717. OzoneHandler : Add common bucket objects. (Anu Engineer via
     Arpit Agarwal)
 
+    HDFS-8757. OzoneHandler : Add localStorageHandler support for Buckets.
+    (Anu Engineer)
