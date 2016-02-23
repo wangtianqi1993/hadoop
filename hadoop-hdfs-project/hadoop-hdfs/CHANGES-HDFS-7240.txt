@@ -38,3 +38,6 @@
 
     HDFS-8757. OzoneHandler : Add localStorageHandler support for Buckets.
     (Anu Engineer)
+
+    HDFS-9834. OzoneHandler : Enable MiniDFSCluster based testing for Ozone.
+    (Anu Engineer via cnauroth)
