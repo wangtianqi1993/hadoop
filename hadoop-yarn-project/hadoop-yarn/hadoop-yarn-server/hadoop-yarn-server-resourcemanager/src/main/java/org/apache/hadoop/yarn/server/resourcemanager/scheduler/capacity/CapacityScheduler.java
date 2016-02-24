@@ -56,6 +56,7 @@ import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.ContainerResourceChangeRequest;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.api.records.NodeId;
+import org.apache.hadoop.yarn.api.records.NodeState;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.QueueACL;
 import org.apache.hadoop.yarn.api.records.QueueInfo;
@@ -91,6 +92,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.RMContainerEven
 import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.RMContainerState;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNodeDecreaseContainerEvent;
+import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNodeResourceUpdateEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.UpdatedContainerInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.AbstractYarnScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.Allocation;
@@ -105,6 +107,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplicat
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplicationAttempt;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerDynamicEditException;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerHealth;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerUtils;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.AssignmentInformation;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.QueueEntitlement;
@@ -1081,6 +1084,20 @@ public class CapacityScheduler extends
       }
     }
 
+    // If the node is decommissioning, send an update to have the total
+    // resource equal to the used resource, so no available resource to
+    // schedule.
+    // TODO: Fix possible race-condition when request comes in before
+    // update is propagated
+    if (nm.getState() == NodeState.DECOMMISSIONING) {
+      this.rmContext
+          .getDispatcher()
+          .getEventHandler()
+          .handle(
+              new RMNodeResourceUpdateEvent(nm.getNodeID(), ResourceOption
+                  .newInstance(getSchedulerNode(nm.getNodeID())
+                      .getUsedResource(), 0)));
+    }
     schedulerHealth.updateSchedulerReleaseDetails(lastNodeUpdateTime,
       releaseResources);
     schedulerHealth.updateSchedulerReleaseCounts(releasedContainers);
@@ -1392,11 +1409,15 @@ public class CapacityScheduler extends
       ContainerExpiredSchedulerEvent containerExpiredEvent = 
           (ContainerExpiredSchedulerEvent) event;
       ContainerId containerId = containerExpiredEvent.getContainerId();
-      super.completedContainer(getRMContainer(containerId),
-          SchedulerUtils.createAbnormalContainerStatus(
-              containerId, 
-              SchedulerUtils.EXPIRED_CONTAINER), 
-          RMContainerEventType.EXPIRE);
+      if (containerExpiredEvent.isIncrease()) {
+        rollbackContainerResource(containerId);
+      } else {
+        completedContainer(getRMContainer(containerId),
+            SchedulerUtils.createAbnormalContainerStatus(
+                containerId,
+                SchedulerUtils.EXPIRED_CONTAINER),
+            RMContainerEventType.EXPIRE);
+      }
     }
     break;
     case KILL_RESERVED_CONTAINER:
@@ -1498,7 +1519,33 @@ public class CapacityScheduler extends
     LOG.info("Removed node " + nodeInfo.getNodeAddress() + 
         " clusterResource: " + clusterResource);
   }
-  
+
+  private void rollbackContainerResource(
+      ContainerId containerId) {
+    RMContainer rmContainer = getRMContainer(containerId);
+    if (rmContainer == null) {
+      LOG.info("Cannot rollback resource for container " + containerId +
+          ". The container does not exist.");
+      return;
+    }
+    FiCaSchedulerApp application = getCurrentAttemptForContainer(containerId);
+    if (application == null) {
+      LOG.info("Cannot rollback resource for container " + containerId +
+          ". The application that the container belongs to does not exist.");
+      return;
+    }
+    LOG.info("Roll back resource for container " + containerId);
+    LeafQueue leafQueue = (LeafQueue) application.getQueue();
+    synchronized(leafQueue) {
+      SchedulerNode schedulerNode =
+          getSchedulerNode(rmContainer.getAllocatedNode());
+      SchedContainerChangeRequest decreaseRequest =
+          new SchedContainerChangeRequest(this.rmContext, schedulerNode,
+              rmContainer, rmContainer.getLastConfirmedResource());
+      decreaseContainer(decreaseRequest, application);
+    }
+  }
+
   @Lock(CapacityScheduler.class)
   @Override
   protected synchronized void completedContainerInternal(

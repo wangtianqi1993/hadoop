@@ -51,6 +51,8 @@ import static org.apache.hadoop.hdfs.DFSConfigKeys.DFS_DATANODE_METRICS_LOGGER_P
 import static org.apache.hadoop.ozone.OzoneConfigKeys.DFS_OBJECTSTORE_ENABLED_DEFAULT;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.DFS_OBJECTSTORE_ENABLED_KEY;
 import static org.apache.hadoop.util.ExitUtil.terminate;
+
+import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
 import org.apache.hadoop.hdfs.protocol.proto.ReconfigurationProtocolProtos.ReconfigurationProtocolService;
 
 import java.io.BufferedOutputStream;
@@ -534,70 +536,80 @@ public class DataNode extends ReconfigurableBase
     return new HdfsConfiguration();
   }
 
+  /**
+   * {@inheritdoc}.
+   */
   @Override
-  public void reconfigurePropertyImpl(String property, String newVal)
+  public String reconfigurePropertyImpl(String property, String newVal)
       throws ReconfigurationException {
-    if (property.equals(DFS_DATANODE_DATA_DIR_KEY)) {
-      IOException rootException = null;
-      try {
-        LOG.info("Reconfiguring " + property + " to " + newVal);
-        this.refreshVolumes(newVal);
-      } catch (IOException e) {
-        rootException = e;
-      } finally {
-        // Send a full block report to let NN acknowledge the volume changes.
+    switch (property) {
+      case DFS_DATANODE_DATA_DIR_KEY: {
+        IOException rootException = null;
         try {
-          triggerBlockReport(
-              new BlockReportOptions.Factory().setIncremental(false).build());
+          LOG.info("Reconfiguring " + property + " to " + newVal);
+          this.refreshVolumes(newVal);
+          return conf.get(DFS_DATANODE_DATA_DIR_KEY);
         } catch (IOException e) {
-          LOG.warn("Exception while sending the block report after refreshing"
-              + " volumes " + property + " to " + newVal, e);
-          if (rootException == null) {
-            rootException = e;
+          rootException = e;
+        } finally {
+          // Send a full block report to let NN acknowledge the volume changes.
+          try {
+            triggerBlockReport(
+                new BlockReportOptions.Factory().setIncremental(false).build());
+          } catch (IOException e) {
+            LOG.warn("Exception while sending the block report after refreshing"
+                + " volumes " + property + " to " + newVal, e);
+            if (rootException == null) {
+              rootException = e;
+            }
+          } finally {
+            if (rootException != null) {
+              throw new ReconfigurationException(property, newVal,
+                  getConf().get(property), rootException);
+            }
           }
+        }
+        break;
+      }
+      case DFS_DATANODE_BALANCE_MAX_NUM_CONCURRENT_MOVES_KEY: {
+        ReconfigurationException rootException = null;
+        try {
+          LOG.info("Reconfiguring " + property + " to " + newVal);
+          int movers;
+          if (newVal == null) {
+            // set to default
+            movers = DFS_DATANODE_BALANCE_MAX_NUM_CONCURRENT_MOVES_DEFAULT;
+          } else {
+            movers = Integer.parseInt(newVal);
+            if (movers <= 0) {
+              rootException = new ReconfigurationException(
+                  property,
+                  newVal,
+                  getConf().get(property),
+                  new IllegalArgumentException(
+                      "balancer max concurrent movers must be larger than 0"));
+            }
+          }
+          xserver.updateBalancerMaxConcurrentMovers(movers);
+          return Integer.toString(movers);
+        } catch (NumberFormatException nfe) {
+          rootException = new ReconfigurationException(
+              property, newVal, getConf().get(property), nfe);
         } finally {
           if (rootException != null) {
-            throw new ReconfigurationException(property, newVal,
-                getConf().get(property), rootException);
+            LOG.warn(String.format(
+                "Exception in updating balancer max concurrent movers %s to %s",
+                property, newVal), rootException);
+            throw rootException;
           }
         }
+        break;
       }
-    } else if (property.equals(
-        DFS_DATANODE_BALANCE_MAX_NUM_CONCURRENT_MOVES_KEY)) {
-      ReconfigurationException rootException = null;
-      try {
-        LOG.info("Reconfiguring " + property + " to " + newVal);
-        int movers;
-        if (newVal == null) {
-          // set to default
-          movers = DFS_DATANODE_BALANCE_MAX_NUM_CONCURRENT_MOVES_DEFAULT;
-        } else {
-          movers = Integer.parseInt(newVal);
-          if (movers <= 0) {
-            rootException = new ReconfigurationException(
-                property,
-                newVal,
-                getConf().get(property),
-                new IllegalArgumentException(
-                    "balancer max concurrent movers must be larger than 0"));
-          }
-        }
-        xserver.updateBalancerMaxConcurrentMovers(movers);
-      } catch(NumberFormatException nfe) {
-        rootException = new ReconfigurationException(
-            property, newVal, getConf().get(property), nfe);
-      } finally {
-        if (rootException != null) {
-          LOG.warn(String.format(
-              "Exception in updating balancer max concurrent movers %s to %s",
-              property, newVal), rootException);
-          throw rootException;
-        }
-      }
-    } else {
-      throw new ReconfigurationException(
-          property, newVal, getConf().get(property));
+      default:
+        break;
     }
+    throw new ReconfigurationException(
+        property, newVal, getConf().get(property));
   }
 
   /**
@@ -1114,8 +1126,11 @@ public class DataNode extends ReconfigurableBase
     if (secureResources != null) {
       tcpPeerServer = new TcpPeerServer(secureResources);
     } else {
+      int backlogLength = conf.getInt(
+          CommonConfigurationKeysPublic.IPC_SERVER_LISTEN_QUEUE_SIZE_KEY,
+          CommonConfigurationKeysPublic.IPC_SERVER_LISTEN_QUEUE_SIZE_DEFAULT);
       tcpPeerServer = new TcpPeerServer(dnConf.socketWriteTimeout,
-          DataNode.getStreamingAddr(conf));
+          DataNode.getStreamingAddr(conf), backlogLength);
     }
     if (dnConf.getTransferSocketRecvBufferSize() > 0) {
       tcpPeerServer.setReceiveBufferSize(
@@ -3397,7 +3412,7 @@ public class DataNode extends ReconfigurableBase
 
     // Asynchronously start the shutdown process so that the rpc response can be
     // sent back.
-    Thread shutdownThread = new Thread() {
+    Thread shutdownThread = new Thread("Async datanode shutdown thread") {
       @Override public void run() {
         if (!shutdownForUpgrade) {
           // Delay the shutdown a bit if not doing for restart.

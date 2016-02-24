@@ -644,6 +644,12 @@ Trunk (Unreleased)
       HADOOP-12685. Input buffer position after encode/decode not consistent
       between different kinds of buffers. (Rui Li via zhz)
 
+      HADOOP-12757. Findbug compilation fails for 'Kafka Library support'.
+      (aajisaka)
+
+      HADOOP-12041. Implement another Reed-Solomon coder in pure Java.
+      (Kai Zheng via zhz)
+
 Release 2.9.0 - UNRELEASED
 
   INCOMPATIBLE CHANGES
@@ -679,6 +685,14 @@ Release 2.9.0 - UNRELEASED
     HADOOP-12662. The build should fail if a -Dbundle option fails (Kai Zheng
     via cmccabe)
 
+    HADOOP-12749. Create a threadpoolexecutor that overrides afterExecute to
+    log uncaught exceptions/errors. (Sidharta Seethana via vvasudev)
+
+    HADOOP-12710. Remove dependency on commons-httpclient for TestHttpServerLogs
+    (Wei-Chiu Chuang via iwasakims)
+
+    HADOOP-12817. Enable TLS v1.1 and 1.2 (rkanter)
+
   BUG FIXES
 
     HADOOP-12605. Fix intermittent failure of TestIPC.testIpcWithReaderQueuing
@@ -704,6 +718,9 @@ Release 2.9.0 - UNRELEASED
 
    HADOOP-12714. Fix hadoop-mapreduce-client-nativetask unit test which fails
    because it is not able to open the "glibc bug spill" file. (cmccabe)
+
+   HADOOP-12829. StatisticsDataReferenceCleaner swallows interrupt exceptions
+   (Gregory Chanan via cmccabe)
 
 Release 2.8.0 - UNRELEASED
 
@@ -750,6 +767,12 @@ Release 2.8.0 - UNRELEASED
     (Larry McCay via cnauroth)
 
     HADOOP-12635. Adding Append API support for WASB. (Dushyanth via cnauroth)
+
+    HADOOP-12426. Add Entry point for Kerberos health check
+    (Steve Loughran via cnauroth)
+
+    HADOOP-12548. Read s3a creds from a Credential Provider.
+    (Larry McCay via cnauroth)
 
   IMPROVEMENTS
 
@@ -1088,6 +1111,44 @@ Release 2.8.0 - UNRELEASED
 
     HADOOP-12696. Add tests for S3Filesystem Contract (Matt Paduano via raviprak)
 
+    HADOOP-12755. Fix typo in defaultFS warning message. (wang)
+
+    HADOOP-12292. Make use of DeleteObjects optional.
+    (Thomas Demoor via stevel)
+
+    HADOOP-12759. RollingFileSystemSink should eagerly rotate directories.
+    (Daniel Templeton via wang)
+
+    HADOOP-12752. Improve diagnostics/use of envvar/sysprop credential
+    propagation (Steve Loughran via cnauroth)
+
+    HADOOP-12764. Increase default value of KMX maxHttpHeaderSize and make it
+    configurable. (zhz)
+
+    HADOOP-12788. OpensslAesCtrCryptoCodec should log which random number generator is used.
+    (Wei-Chiu Chuang via umamahesh)
+
+    HADOOP-12699. TestKMS#testKMSProvider intermittently fails during
+    'test rollover draining'. (Xiao Chen via wang)
+
+    HADOOP-12776. Remove getaclstatus call for non-acl commands in getfacl.
+    (Brahma Reddy Battula via vinayakumarb)
+
+    HADOOP-11031. Design Document for Credential Provider API.
+    (Larry McCay via cnauroth)
+
+    HADOOP-12828. Print user when services are started.
+    (Wei-Chiu Chuang via Yongjun Zhang) 
+
+    HADOOP-11613. Remove commons-httpclient dependency from hadoop-azure.
+    (Masatake Iwasaki via cnauroth) 
+
+    HADOOP-12668. Support excluding weak Ciphers in HttpServer2 through
+    ssl-server.conf. (Vijay Singh via zhz)
+
+    HADOOP-12555. WASB to read credentials from a credential provider.
+    (Larry McCay via cnauroth)
+
   OPTIMIZATIONS
 
     HADOOP-11785. Reduce the number of listStatus operation in distcp
@@ -1128,6 +1189,12 @@ Release 2.8.0 - UNRELEASED
 
     HADOOP-12450. UserGroupInformation should not log at WARN level if no groups
     are found. (Elliott Clark via stevel)
+
+    HADOOP-12758. Extend CSRF Filter with UserAgent Checks
+    (Larry McCay via cnauroth)
+
+    HADOOP-10865. Add a Crc32 chunked verification benchmark for both directly
+    and non-directly buffer cases.  (szetszwo)
 
   BUG FIXES
 
@@ -1656,6 +1723,21 @@ Release 2.8.0 - UNRELEASED
     HADOOP-12735. core-default.xml misspells
     hadoop.workaround.non.threadsafe.getpwuid (Ray Chiang via cmccabe)
 
+    HADOOP-12771. Fix typo in JvmPauseMonitor#getNumGcWarnThreadholdExceeded.
+    (Xiaobing Zhou via xyao)
+
+    HADOOP-12766. The default value of
+    "hadoop.workaround.non.threadsafe.getpwuid" is different between
+    core-default.xml and NativeIO.java (Akira AJISAKA via cmccabe)
+
+    HADOOP-12795. KMS does not log detailed stack trace for unexpected errors.
+    (cnauroth)
+
+    HADOOP-12780. During atomic rename handle crash when one directory has been
+    renamed but not file under it. (Madhumita Chakraborty via cnauroth)
+
+    HADOOP-12878. KMS SPNEGO sequence does not work with WEBHDFS. (xyao)
+
 Release 2.7.3 - UNRELEASED
 
   INCOMPATIBLE CHANGES
@@ -1667,7 +1749,13 @@ Release 2.7.3 - UNRELEASED
     HADOOP-12413. AccessControlList should avoid calling getGroupNames in
     isUserInList with empty groups. (Zhihai Xu via cnauroth)
 
+    HADOOP-12794. Support additional compression levels for GzipCodec.
+    (Ravi Mutyala via junping_du)
+
   OPTIMIZATIONS
+
+    HADOOP-12810. FileSystem#listLocatedStatus causes unnecessary RPC calls
+    (Ryan Blue via vinayakumarb)
 
   BUG FIXES
 
@@ -1700,6 +1788,14 @@ Release 2.7.3 - UNRELEASED
 
     HADOOP-12706. TestLocalFsFCStatistics#testStatisticsThreadLocalDataCleanUp
     times out occasionally (Sangjin Lee and Colin Patrick McCabe via jlowe)
+
+    HADOOP-12761. incremental maven build is not really incremental (sjlee)
+
+    HADOOP-12772. NetworkTopologyWithNodeGroup.getNodeGroup() can loop
+    infinitely for invalid 'loc' values (Kuhu Shukla via kihwal)
+
+    HADOOP-12792. TestUserGroupInformation#testGetServerSideGroups fails in
+    chroot (Eric Badger via jlowe)
 
 Release 2.7.2 - 2016-01-25
 
@@ -1749,6 +1845,9 @@ Release 2.7.2 - 2016-01-25
 
     HADOOP-12415. Fixed pom files to correctly include compile-time dependency on
     netty. (Tom Zeng via cos)
+
+    HADOOP-12786. "hadoop key" command usage is not documented.
+    (Xiao Chen via aajisaka)
 
 Release 2.7.1 - 2015-07-06 
 
@@ -2480,7 +2579,28 @@ Release 2.7.0 - 2015-04-20
     HADOOP-11837. AuthenticationFilter should destroy SignerSecretProvider in
     Tomcat deployments. (Bowen Zhang via wheat9)
 
-Release 2.6.4 - UNRELEASED
+Release 2.6.5 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+    HADOOP-12805. Annotate CanUnbuffer with @InterfaceAudience.Public
+    (Ted Yu via vinayakumarb)
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
+    HADOOP-12773. HBase classes fail to load with client/job classloader
+    enabled (sjlee)
+
+    HADOOP-12589. Fix intermittent test failure of TestCopyPreserveFlag
+    (iwasakims)
+
+Release 2.6.4 - 2016-02-11
 
   INCOMPATIBLE CHANGES
 

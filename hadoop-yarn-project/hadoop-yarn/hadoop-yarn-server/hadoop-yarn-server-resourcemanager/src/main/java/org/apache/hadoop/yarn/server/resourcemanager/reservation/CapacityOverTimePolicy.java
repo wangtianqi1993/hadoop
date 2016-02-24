@@ -26,7 +26,6 @@ import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.yarn.api.records.ReservationId;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.RLESparseResourceAllocation.RLEOperator;
-import org.apache.hadoop.yarn.server.resourcemanager.reservation.exceptions.MismatchedUserException;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.exceptions.PlanningException;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.exceptions.PlanningQuotaException;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.exceptions.ResourceOverCommitException;
@@ -84,14 +83,6 @@ public class CapacityOverTimePolicy implements SharingPolicy {
     // update).
     ReservationAllocation oldReservation =
         plan.getReservationById(reservation.getReservationId());
-
-    // sanity check that the update of a reservation is not changing username
-    if (oldReservation != null
-        && !oldReservation.getUser().equals(reservation.getUser())) {
-      throw new MismatchedUserException(
-          "Updating an existing reservation with mismatched user:"
-              + oldReservation.getUser() + " != " + reservation.getUser());
-    }
 
     long startTime = reservation.getStartTime();
     long endTime = reservation.getEndTime();
@@ -213,6 +204,15 @@ public class CapacityOverTimePolicy implements SharingPolicy {
 
     RLESparseResourceAllocation used =
         plan.getConsumptionForUserOverTime(user, start, end);
+
+    // add back in old reservation used resources if any
+    ReservationAllocation old = plan.getReservationById(oldId);
+    if (old != null) {
+      used =
+          RLESparseResourceAllocation.merge(plan.getResourceCalculator(),
+              Resources.clone(plan.getTotalCapacity()), used,
+              old.getResourcesOverTime(), RLEOperator.subtract, start, end);
+    }
 
     instRLEQuota =
         RLESparseResourceAllocation.merge(plan.getResourceCalculator(),

@@ -23,13 +23,14 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
-import org.apache.hadoop.hdfs.protocol.HdfsConstants;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
 import org.apache.hadoop.hdfs.server.namenode.NameNode;
 import org.apache.hadoop.hdfs.server.namenode.NameNodeAdapter;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 
 import java.io.IOException;
 import java.util.List;
@@ -48,6 +49,9 @@ public class TestSafeModeWithStripedFile {
 
   private MiniDFSCluster cluster;
   private Configuration conf;
+
+  @Rule
+  public Timeout globalTimeout = new Timeout(300000);
 
   @Before
   public void setup() throws IOException {
@@ -74,7 +78,8 @@ public class TestSafeModeWithStripedFile {
 
   @Test
   public void testStripedFile1() throws IOException {
-    doTest(cellSize * 5, 5);
+    int numCell = DATA_BLK_NUM - 1;
+    doTest(cellSize * numCell, numCell);
   }
 
   /**

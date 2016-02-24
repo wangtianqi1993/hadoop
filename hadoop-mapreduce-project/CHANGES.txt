@@ -16,6 +16,9 @@ Trunk (Unreleased)
     MAPREDUCE-6336. Enable v2 FileOutputCommitter by default.
     (Siqi Li via gera)
 
+    MAPREDUCE-6613. Change mapreduce.jobhistory.jhist.format default from
+    json to binary (rchiang via rkanter)
+
   NEW FEATURES
 
     MAPREDUCE-778. Rumen Anonymizer. (Amar Kamat and Chris Douglas via amarrk)
@@ -122,9 +125,6 @@ Trunk (Unreleased)
     (Junping Du via jianhe)
 
   BUG FIXES
-
-    MAPREDUCE-6191. Improve clearing stale state of Java serialization
-                    testcase.  (Sam Liu via Eric Yang)
 
     MAPREDUCE-5714. Removed forceful JVM exit in shutDownJob.  
                      (Jinghui Wang via Eric Yang)
@@ -313,9 +313,18 @@ Release 2.9.0 - UNRELEASED
 
     MAPREDUCE-6431. JobClient should be an AutoClosable (haibochen via rkanter)
 
+    MAPREDUCE-6634. Log uncaught exceptions/errors in various thread pools in
+    mapreduce. (Sidharta Seethana via vvasudev)
+
+    MAPREDUCE-6627. Add machine-readable output to mapred job -history
+    command (rkanter)
+
   OPTIMIZATIONS
 
   BUG FIXES
+
+    MAPREDUCE-6620. Jobs that did not start are shown as starting in 1969 in
+    the JHS web UI (haibochen via rkanter)
 
 Release 2.8.0 - UNRELEASED
 
@@ -475,6 +484,9 @@ Release 2.8.0 - UNRELEASED
 
     MAPREDUCE-6473. Job submission can take a long time during Cluster
     initialization (Kuhu Shukla via jlowe)
+
+    MAPREDUCE-6626. Reuse ObjectMapper instance in MapReduce.
+    (Lin Yiqun via aajisaka)
 
   BUG FIXES
 
@@ -712,6 +724,9 @@ Release 2.8.0 - UNRELEASED
     MAPREDUCE-6616. Fail to create jobhistory file if there are some multibyte
     characters in the job name. (Kousuke Saruta via aajisaka)
 
+    MAPREDUCE-6635. Unsafe long to int conversion in UncompressedSplitLineReader
+    and IndexOutOfBoundsException. (Junping Du via vvasudev)
+
 Release 2.7.3 - UNRELEASED
 
   INCOMPATIBLE CHANGES
@@ -719,6 +734,9 @@ Release 2.7.3 - UNRELEASED
   NEW FEATURES
 
   IMPROVEMENTS
+
+    MAPREDUCE-6637. Testcase Failure : TestFileInputFormat.testSplitLocationInfo.
+    (Brahma Reddy Battula via wang)
 
   OPTIMIZATIONS
 
@@ -738,6 +756,18 @@ Release 2.7.3 - UNRELEASED
 
     MAPREDUCE-6618. YarnClientProtocolProvider leaking the YarnClient thread.
     (Xuan Gong via jlowe)
+
+    MAPREDUCE-6621. Memory Leak in JobClient#submitJobInternal() (Xuan Gong
+    via jlowe)
+
+    MAPREDUCE-6413. TestLocalJobSubmission is failing with unknown host
+    (zhihai xu via jlowe)
+
+    MAPREDUCE-6191. Improve clearing stale state of Java serialization
+                    testcase.  (Sam Liu via Eric Yang)
+
+    MAPREDUCE-6635. Unsafe long to int conversion in UncompressedSplitLineReader
+    and IndexOutOfBoundsException. (Junping Du via vvasudev)
 
 Release 2.7.2 - 2016-01-25
 
@@ -1014,7 +1044,28 @@ Release 2.7.0 - 2015-04-20
     MAPREDUCE-6285. ClientServiceDelegate should not retry upon
     AuthenticationException. (Jonathan Eagles via ozawa)
 
-Release 2.6.4 - UNRELEASED
+Release 2.6.5 - UNRELEASED
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  IMPROVEMENTS
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+
+    MAPREDUCE-6413. TestLocalJobSubmission is failing with unknown host
+    (zhihai xu via jlowe)
+
+    MAPREDUCE-6191. Improve clearing stale state of Java serialization
+                    testcase.  (Sam Liu via Eric Yang)
+
+    MAPREDUCE-6635. Unsafe long to int conversion in UncompressedSplitLineReader
+    and IndexOutOfBoundsException. (Junping Du via vvasudev)
+
+Release 2.6.4 - 2016-02-11
 
   INCOMPATIBLE CHANGES
 
@@ -1046,6 +1097,9 @@ Release 2.6.4 - UNRELEASED
 
     MAPREDUCE-6618. YarnClientProtocolProvider leaking the YarnClient thread.
     (Xuan Gong via jlowe)
+
+    MAPREDUCE-6621. Memory Leak in JobClient#submitJobInternal() (Xuan Gong
+    via jlowe)
 
 Release 2.6.3 - 2015-12-17
 

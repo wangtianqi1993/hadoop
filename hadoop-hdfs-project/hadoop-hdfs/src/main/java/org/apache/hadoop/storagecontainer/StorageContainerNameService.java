@@ -39,7 +39,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class StorageContainerNameService implements Namesystem {
 
   private ReentrantReadWriteLock coarseLock = new ReentrantReadWriteLock();
-  private String blockPoolId;
   private volatile boolean serviceRunning = true;
 
   public void shutdown() {
@@ -52,20 +51,6 @@ public class StorageContainerNameService implements Namesystem {
   }
 
   @Override
-  public void checkSuperuserPrivilege() throws AccessControlException {
-    // TBD
-  }
-
-  @Override
-  public String getBlockPoolId() {
-    return blockPoolId;
-  }
-
-  public void setBlockPoolId(String id) {
-    this.blockPoolId = id;
-  }
-
-  @Override
   public BlockCollection getBlockCollection(long id) {
     return null;
   }
@@ -73,12 +58,6 @@ public class StorageContainerNameService implements Namesystem {
   @Override
   public void startSecretManagerIfNecessary() {
      throw new NotImplementedException();
-  }
-
-  @Override
-  public ErasureCodingPolicy getErasureCodingPolicyForPath(String src)
-      throws IOException {
-    return null;
   }
 
   @Override

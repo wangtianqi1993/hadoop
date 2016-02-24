@@ -248,6 +248,7 @@ import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.StorageReceivedDeletedBlocks;
 import org.apache.hadoop.hdfs.server.protocol.StorageReport;
 import org.apache.hadoop.hdfs.server.protocol.VolumeFailureSummary;
+import org.apache.hadoop.hdfs.web.JsonUtil;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.ipc.CallerContext;
@@ -275,7 +276,6 @@ import org.apache.hadoop.util.VersionInfo;
 import org.apache.log4j.Appender;
 import org.apache.log4j.AsyncAppender;
 import org.apache.log4j.Logger;
-import org.codehaus.jackson.map.ObjectMapper;
 import org.mortbay.util.ajax.JSON;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -3199,7 +3199,7 @@ public class FSNamesystem implements Namesystem, FSNamesystemMBean,
       final BlockInfo b = blocks[i];
       if (b != null && b.getBlockUCState() == BlockUCState.COMMITTED) {
         // b is COMMITTED but not yet COMPLETE, add it to pending replication.
-        blockManager.addExpectedReplicasToPending(b, pendingFile);
+        blockManager.addExpectedReplicasToPending(b);
       }
     }
   }
@@ -4308,9 +4308,7 @@ public class FSNamesystem implements Namesystem, FSNamesystemMBean,
     return new PermissionStatus(fsOwner.getShortUserName(), supergroup, permission);
   }
 
-  @Override
-  public void checkSuperuserPrivilege()
-      throws AccessControlException {
+  void checkSuperuserPrivilege() throws AccessControlException {
     if (isPermissionEnabled) {
       FSPermissionChecker pc = getPermissionChecker();
       pc.checkSuperuserPrivilege();
@@ -4557,9 +4555,8 @@ public class FSNamesystem implements Namesystem, FSNamesystemMBean,
     Map<String, Object> topMap = new TreeMap<String, Object>();
     topMap.put("windows", topWindows);
     topMap.put("timestamp", DFSUtil.dateToIso8601String(now));
-    ObjectMapper mapper = new ObjectMapper();
     try {
-      return mapper.writeValueAsString(topMap);
+      return JsonUtil.toJsonString(topMap);
     } catch (IOException e) {
       LOG.warn("Failed to fetch TopUser metrics", e);
     }
@@ -5599,6 +5596,10 @@ public class FSNamesystem implements Namesystem, FSNamesystemMBean,
           list.add(c.toString());
         }
       }
+    } catch (StandbyException e) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Get corrupt file blocks returned error: " + e.getMessage());
+      }
     } catch (IOException e) {
       LOG.warn("Get corrupt file blocks returned error: " + e.getMessage());
     }
@@ -6574,7 +6575,7 @@ public class FSNamesystem implements Namesystem, FSNamesystemMBean,
     readLock();
     try {
       checkOperation(OperationCategory.READ);
-      return getErasureCodingPolicyForPath(src);
+      return FSDirErasureCodingOp.getErasureCodingPolicy(this, src);
     } finally {
       readUnlock();
     }
@@ -6836,12 +6837,6 @@ public class FSNamesystem implements Namesystem, FSNamesystemMBean,
     } else {
       return "";
     }
-  }
-
-  @Override
-  public ErasureCodingPolicy getErasureCodingPolicyForPath(String src)
-      throws IOException {
-    return FSDirErasureCodingOp.getErasureCodingPolicy(this, src);
   }
 
   /**

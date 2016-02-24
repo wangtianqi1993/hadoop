@@ -43,6 +43,8 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.Rule;
+import org.junit.rules.Timeout;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -58,13 +60,17 @@ public class TestDFSStripedInputStream {
   private DistributedFileSystem fs;
   private final Path dirPath = new Path("/striped");
   private Path filePath = new Path(dirPath, "file");
-  private final ErasureCodingPolicy ecPolicy = ErasureCodingPolicyManager.getSystemDefaultPolicy();
+  private final ErasureCodingPolicy ecPolicy =
+      ErasureCodingPolicyManager.getSystemDefaultPolicy();
   private final short DATA_BLK_NUM = StripedFileTestUtil.NUM_DATA_BLOCKS;
   private final short PARITY_BLK_NUM = StripedFileTestUtil.NUM_PARITY_BLOCKS;
   private final int CELLSIZE = StripedFileTestUtil.BLOCK_STRIPED_CELL_SIZE;
   private final int NUM_STRIPE_PER_BLOCK = 2;
   private final int INTERNAL_BLOCK_SIZE = NUM_STRIPE_PER_BLOCK * CELLSIZE;
   private final int BLOCK_GROUP_SIZE =  DATA_BLK_NUM * INTERNAL_BLOCK_SIZE;
+
+  @Rule
+  public Timeout globalTimeout = new Timeout(300000);
 
   @Before
   public void setup() throws IOException {
@@ -177,7 +183,7 @@ public class TestDFSStripedInputStream {
   @Test
   public void testPreadWithDNFailure() throws Exception {
     final int numBlocks = 4;
-    final int failedDNIdx = 2;
+    final int failedDNIdx = DATA_BLK_NUM - 1;
     DFSTestUtil.createStripedFile(cluster, filePath, null, numBlocks,
         NUM_STRIPE_PER_BLOCK, false);
     LocatedBlocks lbs = fs.getClient().namenode.getBlockLocations(
@@ -195,11 +201,10 @@ public class TestDFSStripedInputStream {
     }
     DFSStripedInputStream in =
         new DFSStripedInputStream(fs.getClient(), filePath.toString(), false,
-            ErasureCodingPolicyManager.getSystemDefaultPolicy(), null);
+            ecPolicy, null);
     int readSize = BLOCK_GROUP_SIZE;
     byte[] readBuffer = new byte[readSize];
     byte[] expected = new byte[readSize];
-    cluster.stopDataNode(failedDNIdx);
     /** A variation of {@link DFSTestUtil#fillExpectedBuf} for striped blocks */
     for (int i = 0; i < NUM_STRIPE_PER_BLOCK; i++) {
       for (int j = 0; j < DATA_BLK_NUM; j++) {
@@ -216,20 +221,30 @@ public class TestDFSStripedInputStream {
         DATA_BLK_NUM, PARITY_BLK_NUM);
 
     // Update the expected content for decoded data
+    int[] missingBlkIdx = new int[PARITY_BLK_NUM];
+    for (int i = 0; i < missingBlkIdx.length; i++) {
+      if (i == 0) {
+        missingBlkIdx[i] = failedDNIdx;
+      } else {
+        missingBlkIdx[i] = DATA_BLK_NUM + i;
+      }
+    }
+    cluster.stopDataNode(failedDNIdx);
     for (int i = 0; i < NUM_STRIPE_PER_BLOCK; i++) {
       byte[][] decodeInputs = new byte[DATA_BLK_NUM + PARITY_BLK_NUM][CELLSIZE];
-      int[] missingBlkIdx = new int[]{failedDNIdx, 7, 8};
-      byte[][] decodeOutputs = new byte[PARITY_BLK_NUM][CELLSIZE];
+      byte[][] decodeOutputs = new byte[missingBlkIdx.length][CELLSIZE];
       for (int j = 0; j < DATA_BLK_NUM; j++) {
         int posInBuf = i * CELLSIZE * DATA_BLK_NUM + j * CELLSIZE;
         if (j != failedDNIdx) {
           System.arraycopy(expected, posInBuf, decodeInputs[j], 0, CELLSIZE);
         }
       }
-      for (int k = 0; k < CELLSIZE; k++) {
-        int posInBlk = i * CELLSIZE + k;
-        decodeInputs[DATA_BLK_NUM][k] = SimulatedFSDataset.simulatedByte(
-            new Block(bg.getBlock().getBlockId() + DATA_BLK_NUM), posInBlk);
+      for (int j = DATA_BLK_NUM; j < DATA_BLK_NUM + PARITY_BLK_NUM; j++) {
+        for (int k = 0; k < CELLSIZE; k++) {
+          int posInBlk = i * CELLSIZE + k;
+          decodeInputs[j][k] = SimulatedFSDataset.simulatedByte(
+              new Block(bg.getBlock().getBlockId() + j), posInBlk);
+        }
       }
       for (int m : missingBlkIdx) {
         decodeInputs[m] = null;

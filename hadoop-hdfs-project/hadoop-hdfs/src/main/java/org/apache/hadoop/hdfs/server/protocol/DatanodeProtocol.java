@@ -76,7 +76,7 @@ public interface DatanodeProtocol {
   final static int DNA_BALANCERBANDWIDTHUPDATE = 8; // update balancer bandwidth
   final static int DNA_CACHE = 9;      // cache blocks
   final static int DNA_UNCACHE = 10;   // uncache blocks
-  final static int DNA_ERASURE_CODING_RECOVERY = 11; // erasure coding recovery command
+  final static int DNA_ERASURE_CODING_RECONSTRUCTION = 11; // erasure coding reconstruction command
 
   /** 
    * Register Datanode.
@@ -131,7 +131,6 @@ public interface DatanodeProtocol {
    *     Each finalized block is represented as 3 longs. Each under-
    *     construction replica is represented as 4 longs.
    *     This is done instead of Block[] to reduce memory used by block reports.
-   * @param reports report of blocks per storage
    * @param context Context information for this block report.
    *
    * @return - the next command for DN to process.

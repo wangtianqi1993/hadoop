@@ -179,6 +179,8 @@ public class Balancer {
       + "\tExcludes the specified datanodes."
       + "\n\t[-include [-f <hosts-file> | <comma-separated list of hosts>]]"
       + "\tIncludes only the specified datanodes."
+      + "\n\t[-source [-f <hosts-file> | <comma-separated list of hosts>]]"
+      + "\tPick only the specified datanodes as source nodes."
       + "\n\t[-blockpools <comma-separated list of blockpool ids>]"
       + "\tThe balancer will only run on blockpools included in this list."
       + "\n\t[-idleiterations <idleiterations>]"
@@ -586,6 +588,8 @@ public class Balancer {
       // Should not run the balancer during an unfinalized upgrade, since moved
       // blocks are not deleted on the source datanode.
       if (!runDuringUpgrade && nnc.isUpgrading()) {
+        System.err.println("Balancer exiting as upgrade is not finalized, "
+            + "please finalize the HDFS upgrade before running the balancer.");
         return newResult(ExitStatus.UNFINALIZED_UPGRADE, bytesLeftToMove, -1);
       }
 
@@ -674,13 +678,12 @@ public class Balancer {
               // must be an error statue, return.
               return r.exitStatus.getExitCode();
             }
-
-            if (!done) {
-              Thread.sleep(sleeptime);
-            }
           } else {
             LOG.info("Skipping blockpool " + nnc.getBlockpoolID());
           }
+        }
+        if (!done) {
+          Thread.sleep(sleeptime);
         }
       }
     } finally {

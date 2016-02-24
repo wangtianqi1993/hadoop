@@ -25,7 +25,6 @@ import java.security.AccessControlException;
 import java.security.Principal;
 import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -40,6 +39,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -83,9 +83,12 @@ import org.apache.hadoop.yarn.api.protocolrecords.KillApplicationResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.MoveApplicationAcrossQueuesRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.RenewDelegationTokenRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.RenewDelegationTokenResponse;
+import org.apache.hadoop.yarn.api.protocolrecords.ReservationListRequest;
+import org.apache.hadoop.yarn.api.protocolrecords.ReservationListResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.SubmitApplicationRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.SubmitApplicationResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.UpdateApplicationPriorityRequest;
+import org.apache.hadoop.yarn.api.records.AMBlackListingRequest;
 import org.apache.hadoop.yarn.api.records.ApplicationAccessType;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.ApplicationReport;
@@ -93,6 +96,7 @@ import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.api.records.ContainerLaunchContext;
 import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
 import org.apache.hadoop.yarn.api.records.LocalResource;
+import org.apache.hadoop.yarn.api.records.LogAggregationContext;
 import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.api.records.NodeLabel;
 import org.apache.hadoop.yarn.api.records.NodeState;
@@ -124,6 +128,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CSQueue;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.AMBlackListingRequestInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.AppAttemptInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.AppAttemptsInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.AppInfo;
@@ -142,6 +147,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.FairSchedulerInf
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.FifoSchedulerInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.LabelsToNodesInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.LocalResourceInfo;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.LogAggregationContextInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.NewApplication;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.NodeInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.NodeLabelInfo;
@@ -153,6 +159,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.NodesInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationDefinitionInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationDeleteRequestInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationDeleteResponseInfo;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationListInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationRequestInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationRequestsInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationSubmissionResponseInfo;
@@ -1410,6 +1417,7 @@ public class RMWebServices extends WebServices {
 
     ApplicationSubmissionContext appContext =
         createAppSubmissionContext(newApp);
+
     final SubmitApplicationRequest req =
         SubmitApplicationRequest.newInstance(appContext);
 
@@ -1495,7 +1503,22 @@ public class RMWebServices extends WebServices {
           newApp.getAppNodeLabelExpression(),
           newApp.getAMContainerNodeLabelExpression());
     appContext.setApplicationTags(newApp.getApplicationTags());
-
+    appContext.setAttemptFailuresValidityInterval(
+        newApp.getAttemptFailuresValidityInterval());
+    if (newApp.getLogAggregationContextInfo() != null) {
+      appContext.setLogAggregationContext(createLogAggregationContext(
+          newApp.getLogAggregationContextInfo()));
+    }
+    String reservationIdStr = newApp.getReservationId();
+    if (reservationIdStr != null && !reservationIdStr.isEmpty()) {
+      ReservationId reservationId = ReservationId.parseReservationId(
+          reservationIdStr);
+      appContext.setReservationID(reservationId);
+    }
+    if (newApp.getAMBlackListingRequestInfo() != null) {
+      appContext.setAMBlackListRequest(createAMBlackListingRequest(
+          newApp.getAMBlackListingRequestInfo()));
+    }
     return appContext;
   }
 
@@ -1631,6 +1654,24 @@ public class RMWebServices extends WebServices {
 
     callerUGI.setAuthenticationMethod(AuthenticationMethod.KERBEROS);
     return callerUGI;
+  }
+
+  private LogAggregationContext createLogAggregationContext(
+      LogAggregationContextInfo logAggregationContextInfo) {
+    return LogAggregationContext.newInstance(
+        logAggregationContextInfo.getIncludePattern(),
+        logAggregationContextInfo.getExcludePattern(),
+        logAggregationContextInfo.getRolledLogsIncludePattern(),
+        logAggregationContextInfo.getRolledLogsExcludePattern(),
+        logAggregationContextInfo.getLogAggregationPolicyClassName(),
+        logAggregationContextInfo.getLogAggregationPolicyParameters());
+  }
+
+  private AMBlackListingRequest createAMBlackListingRequest(
+      AMBlackListingRequestInfo amBlackListingRequestInfo) {
+    return AMBlackListingRequest.newInstance(
+        amBlackListingRequestInfo.getAMBlackListingEnabled(),
+        amBlackListingRequestInfo.getBlackListingDisableFailureThreshold());
   }
 
   @POST
@@ -2129,6 +2170,58 @@ public class RMWebServices extends WebServices {
             .parseReservationId(resContext.getReservationId()));
 
     return request;
+  }
+
+  /**
+   * Function to retrieve a list of all the reservations.
+   */
+  @GET
+  @Path("/reservation/list")
+  @Produces({ MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML })
+  public Response listReservation(
+          @QueryParam("queue") @DefaultValue("default") String queue,
+          @QueryParam("reservation-id") @DefaultValue("") String reservationId,
+          @QueryParam("start-time") @DefaultValue("0") long startTime,
+          @QueryParam("end-time") @DefaultValue("-1") long endTime,
+          @QueryParam("include-resource-allocations") @DefaultValue("false")
+          boolean includeResourceAllocations, @Context HttpServletRequest hsr)
+          throws Exception {
+    init();
+
+    final ReservationListRequest request = ReservationListRequest.newInstance(
+          queue, reservationId, startTime, endTime, includeResourceAllocations);
+
+    UserGroupInformation callerUGI = getCallerUserGroupInformation(hsr, true);
+    if (callerUGI == null) {
+      throw new AuthorizationException("Unable to obtain user name, "
+              + "user not authenticated");
+    }
+    if (UserGroupInformation.isSecurityEnabled() && isStaticUser(callerUGI)) {
+      String msg = "The default static user cannot carry out this operation.";
+      return Response.status(Status.FORBIDDEN).entity(msg).build();
+    }
+
+    ReservationListResponse resRespInfo;
+    try {
+      resRespInfo = callerUGI.doAs(
+          new PrivilegedExceptionAction<ReservationListResponse>() {
+            @Override
+            public ReservationListResponse run() throws IOException,
+                    YarnException {
+              return rm.getClientRMService().listReservations(request);
+            }
+          });
+    } catch (UndeclaredThrowableException ue) {
+      if (ue.getCause() instanceof YarnException) {
+        throw new BadRequestException(ue.getCause().getMessage());
+      }
+      LOG.info("List reservation request failed", ue);
+      throw ue;
+    }
+
+    ReservationListInfo resResponse = new ReservationListInfo(resRespInfo,
+            includeResourceAllocations);
+    return Response.status(Status.OK).entity(resResponse).build();
   }
 
 }

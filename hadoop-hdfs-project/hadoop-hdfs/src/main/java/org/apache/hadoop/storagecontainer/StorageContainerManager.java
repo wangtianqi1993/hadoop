@@ -182,8 +182,9 @@ public class StorageContainerManager
       final int maxTransfer = blockManager.getMaxReplicationStreams()
           - xmitsInProgress;
       DatanodeCommand[] cmds = blockManager.getDatanodeManager()
-          .handleHeartbeat(registration, reports, ns.getBlockPoolId(), 0, 0,
-              xceiverCount, maxTransfer, failedVolumes, volumeFailureSummary);
+          .handleHeartbeat(registration, reports, blockManager.getBlockPoolId(),
+              0, 0, xceiverCount, maxTransfer, failedVolumes,
+              volumeFailureSummary);
 
       return new HeartbeatResponse(cmds,
           new NNHAStatusHeartbeat(HAServiceProtocol.HAServiceState.ACTIVE,

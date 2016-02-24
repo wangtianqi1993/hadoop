@@ -815,7 +815,11 @@
   <description>
         Specifies the maximum amount of bandwidth that each datanode
         can utilize for the balancing purpose in term of
-        the number of bytes per second.
+        the number of bytes per second. You can use the following
+        suffix (case insensitive):
+        k(kilo), m(mega), g(giga), t(tera), p(peta), e(exa)to specify the size
+        (such as 128k, 512m, 1g, etc.).
+        Or provide complete size in bytes (such as 134217728 for 128 MB).
   </description>
 </property>
 
@@ -920,6 +924,18 @@
   <description>Comma-separated list of namenode plug-ins to be activated.
   </description>
 </property>
+
+<property>
+  <name>dfs.namenode.block-placement-policy.default.prefer-local-node</name>
+  <value>true</value>
+  <description>Controls how the default block placement policy places
+  the first replica of a block. When true, it will prefer the node where
+  the client is running.  When false, it will prefer a node in the same rack
+  as the client. Setting to false avoids situations where entire copies of
+  large files end up on a single node, thus creating hotspots.
+  </description>
+</property>
+
 
 <property>
   <name>dfs.stream-buffer-size</name>
@@ -2654,23 +2670,34 @@
 </property>
 
 <property>
-  <name>dfs.datanode.stripedread.timeout.millis</name>
+  <name>dfs.datanode.ec.reconstruction.stripedread.timeout.millis</name>
   <value>5000</value>
   <description>Datanode striped read timeout in milliseconds.
   </description>
 </property>
 
 <property>
-  <name>dfs.datanode.stripedread.threads</name>
+  <name>dfs.datanode.ec.reconstruction.stripedread.threads</name>
   <value>20</value>
-  <description>Number of threads used by the Datanode for background recovery work.
+  <description>
+    Number of threads used by the Datanode to read striped block
+    during background reconstruction work.
   </description>
 </property>
 
 <property>
-  <name>dfs.datanode.stripedread.buffer.size</name>
+  <name>dfs.datanode.ec.reconstruction.stripedread.buffer.size</name>
   <value>65536</value>
   <description>Datanode striped read buffer size.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datanode.ec.reconstruction.stripedblock.threads.size</name>
+  <value>8</value>
+  <description>
+    Number of threads used by the Datanode for background
+    reconstruction work.
   </description>
 </property>
 
@@ -2751,4 +2778,56 @@
   </description>
 </property>
 
+<property>
+  <name>dfs.webhdfs.rest-csrf.enabled</name>
+  <value>false</value>
+  <description>
+    If true, then enables WebHDFS protection against cross-site request forgery
+    (CSRF).  The WebHDFS client also uses this property to determine whether or
+    not it needs to send the custom CSRF prevention header in its HTTP requests.
+  </description>
+</property>
+
+<property>
+  <name>dfs.webhdfs.rest-csrf.custom-header</name>
+  <value>X-XSRF-HEADER</value>
+  <description>
+    The name of a custom header that HTTP requests must send when protection
+    against cross-site request forgery (CSRF) is enabled for WebHDFS by setting
+    dfs.webhdfs.rest-csrf.enabled to true.  The WebHDFS client also uses this
+    property to determine whether or not it needs to send the custom CSRF
+    prevention header in its HTTP requests.
+  </description>
+</property>
+
+<property>
+  <name>dfs.webhdfs.rest-csrf.methods-to-ignore</name>
+  <value>GET,OPTIONS,HEAD,TRACE</value>
+  <description>
+    A comma-separated list of HTTP methods that do not require HTTP requests to
+    include a custom header when protection against cross-site request forgery
+    (CSRF) is enabled for WebHDFS by setting dfs.webhdfs.rest-csrf.enabled to
+    true.  The WebHDFS client also uses this property to determine whether or
+    not it needs to send the custom CSRF prevention header in its HTTP requests.
+  </description>
+</property>
+
+<property>
+  <name>dfs.webhdfs.rest-csrf.browser-useragents-regex</name>
+  <value>^Mozilla.*,^Opera.*</value>
+  <description>
+    A comma-separated list of regular expressions used to match against an HTTP
+    request's User-Agent header when protection against cross-site request
+    forgery (CSRF) is enabled for WebHDFS by setting
+    dfs.webhdfs.reset-csrf.enabled to true.  If the incoming User-Agent matches
+    any of these regular expressions, then the request is considered to be sent
+    by a browser, and therefore CSRF prevention is enforced.  If the request's
+    User-Agent does not match any of these regular expressions, then the request
+    is considered to be sent by something other than a browser, such as scripted
+    automation.  In this case, CSRF is not a potential attack vector, so
+    the prevention is not enforced.  This helps achieve backwards-compatibility
+    with existing automation that has not been updated to send the CSRF
+    prevention header.
+  </description>
+</property>
 </configuration>

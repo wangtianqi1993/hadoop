@@ -60,7 +60,7 @@ message DatanodeCommandProto {
     UnusedUpgradeCommand = 6;
     NullDatanodeCommand = 7;
     BlockIdCommand = 8;
-    BlockECRecoveryCommand = 9;
+    BlockECReconstructionCommand = 9;
   }
 
   required Type cmdType = 1;    // Type of the command
@@ -74,7 +74,7 @@ message DatanodeCommandProto {
   optional KeyUpdateCommandProto keyUpdateCmd = 6;
   optional RegisterCommandProto registerCmd = 7;
   optional BlockIdCommandProto blkIdCmd = 8;
-  optional BlockECRecoveryCommandProto blkECRecoveryCmd = 9;
+  optional BlockECReconstructionCommandProto blkECReconstructionCmd = 9;
 }
 
 /**
@@ -149,10 +149,10 @@ message RegisterCommandProto {
 }
 
 /**
- * Block Erasure coding recovery command
+ * Block Erasure coding reconstruction command
  */
-message BlockECRecoveryCommandProto {
-  repeated BlockECRecoveryInfoProto blockECRecoveryinfo = 1;
+message BlockECReconstructionCommandProto {
+  repeated BlockECReconstructionInfoProto blockECReconstructioninfo = 1;
 }
 
 /**
@@ -226,8 +226,8 @@ message HeartbeatResponseProto {
   repeated DatanodeCommandProto cmds = 1; // Returned commands can be null
   required NNHAStatusHeartbeatProto haStatus = 2;
   optional RollingUpgradeStatusProto rollingUpgradeStatus = 3;
-  optional uint64 fullBlockReportLeaseId = 4 [ default = 0 ];
-  optional RollingUpgradeStatusProto rollingUpgradeStatusV2 = 5;
+  optional RollingUpgradeStatusProto rollingUpgradeStatusV2 = 4;
+  optional uint64 fullBlockReportLeaseId = 5 [ default = 0 ];
 }
 
 /**
@@ -261,6 +261,9 @@ message BlockReportContextProto  {
   // The block report lease ID, or 0 if we are sending without a lease to
   // bypass rate-limiting.
   optional uint64 leaseId = 4 [ default = 0 ];
+
+  // True if the reported blocks are sorted by increasing block IDs
+  optional bool sorted = 5 [default = false];
 }
 
 /**

@@ -29,6 +29,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.management.NotCompliantMBeanException;
@@ -569,7 +570,7 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
       }
       Map<Block, BInfo> map = blockMap.get(bpid);
       if (map == null) {
-        map = new HashMap<Block, BInfo>();
+        map = new TreeMap<>();
         blockMap.put(bpid, map);
       }
       
@@ -1214,7 +1215,7 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
 
   @Override // FsDatasetSpi
   public void addBlockPool(String bpid, Configuration conf) {
-    Map<Block, BInfo> map = new HashMap<Block, BInfo>();
+    Map<Block, BInfo> map = new TreeMap<>();
     blockMap.put(bpid, map);
     storage.addBlockPool(bpid);
   }

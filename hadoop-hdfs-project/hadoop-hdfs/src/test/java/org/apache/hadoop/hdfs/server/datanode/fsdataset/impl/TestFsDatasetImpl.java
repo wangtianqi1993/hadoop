@@ -19,6 +19,7 @@ package org.apache.hadoop.hdfs.server.datanode.fsdataset.impl;
 
 import com.google.common.collect.Lists;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystemTestHelper;
 import org.apache.hadoop.fs.Path;
@@ -65,6 +66,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -89,8 +91,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TestFsDatasetImpl {
+  Logger LOG = LoggerFactory.getLogger(TestFsDatasetImpl.class);
   private static final String BASE_DIR =
       new FileSystemTestHelper().getTestRootDir();
   private static final int NUM_INIT_VOLUMES = 2;
@@ -119,6 +124,7 @@ public class TestFsDatasetImpl {
     List<Storage.StorageDirectory> dirs =
         new ArrayList<Storage.StorageDirectory>();
     List<String> dirStrings = new ArrayList<String>();
+    FileUtils.deleteDirectory(new File(BASE_DIR));
     for (int i = 0; i < numDirs; i++) {
       File loc = new File(BASE_DIR + "/data" + i);
       dirStrings.add(new Path(loc.toString()).toUri().toString());
@@ -205,6 +211,32 @@ public class TestFsDatasetImpl {
     }
     assertEquals(actualVolumes.size(), expectedVolumes.size());
     assertTrue(actualVolumes.containsAll(expectedVolumes));
+  }
+
+  @Test
+  public void testAddVolumeWithSameStorageUuid() throws IOException {
+    HdfsConfiguration conf = new HdfsConfiguration();
+    MiniDFSCluster cluster = new MiniDFSCluster.Builder(conf)
+        .numDataNodes(1).build();
+    try {
+      cluster.waitActive();
+      assertTrue(cluster.getDataNodes().get(0).isConnectedToNN(
+          cluster.getNameNode().getServiceRpcAddress()));
+
+      MiniDFSCluster.DataNodeProperties dn = cluster.stopDataNode(0);
+      File vol0 = cluster.getStorageDir(0, 0);
+      File vol1 = cluster.getStorageDir(0, 1);
+      Storage.StorageDirectory sd0 = new Storage.StorageDirectory(vol0);
+      Storage.StorageDirectory sd1 = new Storage.StorageDirectory(vol1);
+      FileUtils.copyFile(sd0.getVersionFile(), sd1.getVersionFile());
+
+      cluster.restartDataNode(dn, true);
+      cluster.waitActive();
+      assertFalse(cluster.getDataNodes().get(0).isConnectedToNN(
+          cluster.getNameNode().getServiceRpcAddress()));
+    } finally {
+      cluster.shutdown();
+    }
   }
 
   @Test(timeout = 30000)
@@ -296,6 +328,7 @@ public class TestFsDatasetImpl {
       FsVolumeImpl volume = mock(FsVolumeImpl.class);
       oldVolumes.add(volume);
       when(volume.getBasePath()).thenReturn("data" + i);
+      when(volume.checkClosed()).thenReturn(true);
       FsVolumeReference ref = mock(FsVolumeReference.class);
       when(ref.getVolume()).thenReturn(volume);
       volumeList.addVolume(ref);

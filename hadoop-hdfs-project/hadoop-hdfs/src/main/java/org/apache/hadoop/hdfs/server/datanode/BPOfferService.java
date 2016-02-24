@@ -32,7 +32,7 @@ import org.apache.hadoop.hdfs.protocol.RollingUpgradeStatus;
 import org.apache.hadoop.hdfs.protocolPB.DatanodeProtocolClientSideTranslatorPB;
 import org.apache.hadoop.hdfs.server.datanode.dataset.DatasetSpi;
 import org.apache.hadoop.hdfs.server.protocol.*;
-import org.apache.hadoop.hdfs.server.protocol.BlockECRecoveryCommand.BlockECRecoveryInfo;
+import org.apache.hadoop.hdfs.server.protocol.BlockECReconstructionCommand.BlockECReconstructionInfo;
 import org.apache.hadoop.hdfs.server.protocol.ReceivedDeletedBlockInfo.BlockStatus;
 
 import org.slf4j.Logger;
@@ -238,14 +238,27 @@ class BPOfferService {
    */
   void notifyNamenodeReceivedBlock(
       ExtendedBlock block, String delHint, String storageUuid) {
+    notifyNamenodeBlock(block, BlockStatus.RECEIVED_BLOCK, delHint,
+        storageUuid);
+  }
+
+  void notifyNamenodeReceivingBlock(ExtendedBlock block, String storageUuid) {
+    notifyNamenodeBlock(block, BlockStatus.RECEIVING_BLOCK, null, storageUuid);
+  }
+
+  void notifyNamenodeDeletedBlock(ExtendedBlock block, String storageUuid) {
+    notifyNamenodeBlock(block, BlockStatus.DELETED_BLOCK, null, storageUuid);
+  }
+
+  private void notifyNamenodeBlock(ExtendedBlock block, BlockStatus status,
+      String delHint, String storageUuid) {
     checkBlock(block);
-    ReceivedDeletedBlockInfo bInfo = new ReceivedDeletedBlockInfo(
-        block.getLocalBlock(),
-        ReceivedDeletedBlockInfo.BlockStatus.RECEIVED_BLOCK,
-        delHint);
+    final ReceivedDeletedBlockInfo info = new ReceivedDeletedBlockInfo(
+        block.getLocalBlock(), status, delHint);
+    final DatanodeStorage storage = dn.getFSDataset().getStorage(storageUuid);
 
     for (BPServiceActor actor : bpServices) {
-      actor.notifyNamenodeBlock(bInfo, storageUuid, true);
+      actor.getIbrManager().notifyNamenodeBlock(info, storage);
     }
   }
 
@@ -255,26 +268,6 @@ class BPOfferService {
     Preconditions.checkArgument(block.getBlockPoolId().equals(getBlockPoolId()),
         "block belongs to BP %s instead of BP %s",
         block.getBlockPoolId(), getBlockPoolId());
-  }
-  
-  void notifyNamenodeDeletedBlock(ExtendedBlock block, String storageUuid) {
-    checkBlock(block);
-    ReceivedDeletedBlockInfo bInfo = new ReceivedDeletedBlockInfo(
-       block.getLocalBlock(), BlockStatus.DELETED_BLOCK, null);
-    
-    for (BPServiceActor actor : bpServices) {
-      actor.notifyNamenodeDeletedBlock(bInfo, storageUuid);
-    }
-  }
-  
-  void notifyNamenodeReceivingBlock(ExtendedBlock block, String storageUuid) {
-    checkBlock(block);
-    ReceivedDeletedBlockInfo bInfo = new ReceivedDeletedBlockInfo(
-       block.getLocalBlock(), BlockStatus.RECEIVING_BLOCK, null);
-    
-    for (BPServiceActor actor : bpServices) {
-      actor.notifyNamenodeBlock(bInfo, storageUuid, false);
-    }
   }
 
   //This must be called only by blockPoolManager
@@ -583,7 +576,7 @@ class BPOfferService {
   @VisibleForTesting
   void triggerDeletionReportForTests() throws IOException {
     for (BPServiceActor actor : bpServices) {
-      actor.triggerDeletionReportForTests();
+      actor.getIbrManager().triggerDeletionReportForTests();
     }
   }
 
@@ -730,9 +723,10 @@ class BPOfferService {
         dxcs.balanceThrottler.setBandwidth(bandwidth);
       }
       break;
-    case DatanodeProtocol.DNA_ERASURE_CODING_RECOVERY:
+    case DatanodeProtocol.DNA_ERASURE_CODING_RECONSTRUCTION:
       LOG.info("DatanodeCommand action: DNA_ERASURE_CODING_RECOVERY");
-      Collection<BlockECRecoveryInfo> ecTasks = ((BlockECRecoveryCommand) cmd).getECTasks();
+      Collection<BlockECReconstructionInfo> ecTasks =
+          ((BlockECReconstructionCommand) cmd).getECTasks();
       dn.getErasureCodingWorker().processErasureCodingTasks(ecTasks);
       break;
     default:
@@ -764,7 +758,7 @@ class BPOfferService {
     case DatanodeProtocol.DNA_BALANCERBANDWIDTHUPDATE:
     case DatanodeProtocol.DNA_CACHE:
     case DatanodeProtocol.DNA_UNCACHE:
-    case DatanodeProtocol.DNA_ERASURE_CODING_RECOVERY:
+    case DatanodeProtocol.DNA_ERASURE_CODING_RECONSTRUCTION:
       LOG.warn("Got a command from standby NN - ignoring command:" + cmd.getAction());
       break;
     default:
