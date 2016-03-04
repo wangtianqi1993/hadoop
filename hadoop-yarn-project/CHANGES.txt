@@ -235,6 +235,9 @@ Branch YARN-2928: Timeline Server Next Generation: Phase 1
     YARN-4409. Fix javadoc and checkstyle issues in timelineservice code (Varun
     Saxena via sjlee)
 
+    YARN-4700. ATS storage has one extra record each time the RM got restarted.
+    (Naganarasimha G R via varunsaxena)
+
 Trunk - Unreleased
 
   INCOMPATIBLE CHANGES
