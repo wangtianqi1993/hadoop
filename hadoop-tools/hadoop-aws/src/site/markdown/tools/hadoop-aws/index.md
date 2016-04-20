@@ -19,6 +19,9 @@ JAR file, `hadoop-aws.jar` also declares a transitive dependency on all
 external artifacts which are needed for this support —enabling downstream
 applications to easily use this support.
 
+To make it part of Apache Hadoop's default classpath, simply make sure that
+HADOOP_OPTIONAL_TOOLS in hadoop-env.sh has 'hadoop-aws' in the list.
+
 Features
 
 1. The "classic" `s3:` filesystem for storing objects in Amazon S3 Storage
@@ -30,7 +33,7 @@ higher performance.
 
 The specifics of using these filesystems are documented below.
 
-## Warning: Object Stores are not filesystems.
+## Warning #1: Object Stores are not filesystems.
 
 Amazon S3 is an example of "an object store". In order to achieve scalability
 and especially high availability, S3 has —as many other cloud object stores have
@@ -218,6 +221,13 @@ this capability.
       <description>AWS S3 endpoint to connect to. An up-to-date list is
         provided in the AWS Documentation: regions and endpoints. Without this
         property, the standard region (s3.amazonaws.com) is assumed.
+      </description>
+    </property>
+
+    <property>
+      <name>fs.s3a.path.style.access</name>
+      <description>Enable S3 path style access ie disabling the default virtual hosting behaviour.
+        Useful for S3A-compliant storage providers as it removes the need to set up DNS for virtual hosting.
       </description>
     </property>
 
@@ -414,6 +424,13 @@ which pass in authentication details to the test runner
 These are both Hadoop XML configuration files, which must be placed into
 `hadoop-tools/hadoop-aws/src/test/resources`.
 
+### `core-site.xml`
+
+This file pre-exists and sources the configurations created
+under `auth-keys.xml`.
+
+For most purposes you will not need to edit this file unless you
+need to apply a specific, non-default property change during the tests.
 
 ### `auth-keys.xml`
 

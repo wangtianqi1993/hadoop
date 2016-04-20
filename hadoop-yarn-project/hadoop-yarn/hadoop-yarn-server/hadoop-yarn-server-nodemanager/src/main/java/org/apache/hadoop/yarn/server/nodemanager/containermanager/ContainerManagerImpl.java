@@ -183,7 +183,7 @@ public class ContainerManagerImpl extends CompositeService implements
   private final ReadLock readLock;
   private final WriteLock writeLock;
   private AMRMProxyService amrmProxyService;
-  private boolean amrmProxyEnabled = false;
+  protected boolean amrmProxyEnabled = false;
 
   private long waitForContainersOnShutdownMillis;
 
@@ -247,19 +247,7 @@ public class ContainerManagerImpl extends CompositeService implements
     addService(sharedCacheUploader);
     dispatcher.register(SharedCacheUploadEventType.class, sharedCacheUploader);
 
-    amrmProxyEnabled =
-        conf.getBoolean(YarnConfiguration.AMRM_PROXY_ENABLED,
-            YarnConfiguration.DEFAULT_AMRM_PROXY_ENABLED);
-
-    if (amrmProxyEnabled) {
-      LOG.info("AMRMProxyService is enabled. "
-          + "All the AM->RM requests will be intercepted by the proxy");
-      this.amrmProxyService =
-          new AMRMProxyService(this.context, this.dispatcher);
-      addService(this.amrmProxyService);
-    } else {
-      LOG.info("AMRMProxyService is disabled");
-    }
+    createAMRMProxyService(conf);
 
     waitForContainersOnShutdownMillis =
         conf.getLong(YarnConfiguration.NM_SLEEP_DELAY_BEFORE_SIGKILL_MS,
@@ -272,8 +260,20 @@ public class ContainerManagerImpl extends CompositeService implements
     recover();
   }
 
-  public boolean isARMRMProxyEnabled() {
-    return amrmProxyEnabled;
+  protected void createAMRMProxyService(Configuration conf) {
+    this.amrmProxyEnabled =
+        conf.getBoolean(YarnConfiguration.AMRM_PROXY_ENABLED,
+            YarnConfiguration.DEFAULT_AMRM_PROXY_ENABLED);
+
+    if (amrmProxyEnabled) {
+      LOG.info("AMRMProxyService is enabled. "
+          + "All the AM->RM requests will be intercepted by the proxy");
+      this.setAMRMProxyService(
+          new AMRMProxyService(this.context, this.dispatcher));
+      addService(this.getAMRMProxyService());
+    } else {
+      LOG.info("AMRMProxyService is disabled");
+    }
   }
 
   @SuppressWarnings("unchecked")
@@ -296,19 +296,7 @@ public class ContainerManagerImpl extends CompositeService implements
         if (LOG.isDebugEnabled()) {
           LOG.debug("Recovering container with state: " + rcs);
         }
-
         recoverContainer(rcs);
-      }
-
-      String diagnostic = "Application marked finished during recovery";
-      for (ApplicationId appId : appsState.getFinishedApplications()) {
-
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Application marked finished during recovery: " + appId);
-        }
-
-        dispatcher.getEventHandler().handle(
-            new ApplicationFinishEvent(appId, diagnostic));
       }
     } else {
       LOG.info("Not a recoverable state store. Nothing to recover.");
@@ -810,9 +798,9 @@ public class ContainerManagerImpl extends CompositeService implements
 
           // Initialize the AMRMProxy service instance only if the container is of
           // type AM and if the AMRMProxy service is enabled
-          if (isARMRMProxyEnabled() && containerTokenIdentifier
-              .getContainerType().equals(ContainerType.APPLICATION_MASTER)) {
-            this.amrmProxyService.processApplicationStartRequest(request);
+          if (amrmProxyEnabled && containerTokenIdentifier.getContainerType()
+              .equals(ContainerType.APPLICATION_MASTER)) {
+            this.getAMRMProxyService().processApplicationStartRequest(request);
           }
 
           startContainerInternal(nmTokenIdentifier, containerTokenIdentifier,
@@ -1332,11 +1320,6 @@ public class ContainerManagerImpl extends CompositeService implements
         } else if (appsFinishedEvent.getReason() == CMgrCompletedAppsEvent.Reason.BY_RESOURCEMANAGER) {
           diagnostic = "Application killed by ResourceManager";
         }
-        try {
-          this.context.getNMStateStore().storeFinishedApplication(appID);
-        } catch (IOException e) {
-          LOG.error("Unable to update application state in store", e);
-        }
         this.dispatcher.getEventHandler().handle(
             new ApplicationFinishEvent(appID,
                 diagnostic));
@@ -1413,4 +1396,15 @@ public class ContainerManagerImpl extends CompositeService implements
   public Map<String, ByteBuffer> getAuxServiceMetaData() {
     return this.auxiliaryServices.getMetaData();
   }
+
+  @Private
+  public AMRMProxyService getAMRMProxyService() {
+    return this.amrmProxyService;
+  }
+
+  @Private
+  protected void setAMRMProxyService(AMRMProxyService amrmProxyService) {
+    this.amrmProxyService = amrmProxyService;
+  }
+
 }

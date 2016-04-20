@@ -76,6 +76,18 @@ public class StripedBlockUtil {
   public static final Logger LOG = LoggerFactory.getLogger(StripedBlockUtil.class);
 
   /**
+   * Parses a striped block group into individual blocks.
+   * @param bg The striped block group
+   * @param ecPolicy The erasure coding policy
+   * @return An array of the blocks in the group
+   */
+  public static LocatedBlock[] parseStripedBlockGroup(LocatedStripedBlock bg,
+                                               ErasureCodingPolicy ecPolicy) {
+    return parseStripedBlockGroup(bg, ecPolicy.getCellSize(),
+        ecPolicy.getNumDataUnits(), ecPolicy.getNumParityUnits());
+  }
+
+  /**
    * This method parses a striped block group into individual blocks.
    *
    * @param bg The striped block group
@@ -129,6 +141,12 @@ public class StripedBlockUtil {
     return locatedBlock;
   }
 
+  public static ExtendedBlock constructInternalBlock(
+      ExtendedBlock blockGroup, ErasureCodingPolicy ecPolicy,
+      int idxInBlockGroup) {
+    return constructInternalBlock(blockGroup, ecPolicy.getCellSize(),
+        ecPolicy.getNumDataUnits(), idxInBlockGroup);
+  }
   /**
    * This method creates an internal {@link ExtendedBlock} at the given index
    * of a block group.
@@ -142,21 +160,28 @@ public class StripedBlockUtil {
     return block;
   }
 
+  public static long getInternalBlockLength(long dataSize,
+                                            ErasureCodingPolicy ecPolicy,
+                                            int idxInBlockGroup) {
+    return getInternalBlockLength(dataSize, ecPolicy.getCellSize(),
+        ecPolicy.getNumDataUnits(), idxInBlockGroup);
+  }
+
   /**
    * Get the size of an internal block at the given index of a block group
    *
    * @param dataSize Size of the block group only counting data blocks
    * @param cellSize The size of a striping cell
    * @param numDataBlocks The number of data blocks
-   * @param i The logical index in the striped block group
+   * @param idxInBlockGroup The logical index in the striped block group
    * @return The size of the internal block at the specified index
    */
   public static long getInternalBlockLength(long dataSize,
-      int cellSize, int numDataBlocks, int i) {
+      int cellSize, int numDataBlocks, int idxInBlockGroup) {
     Preconditions.checkArgument(dataSize >= 0);
     Preconditions.checkArgument(cellSize > 0);
     Preconditions.checkArgument(numDataBlocks > 0);
-    Preconditions.checkArgument(i >= 0);
+    Preconditions.checkArgument(idxInBlockGroup >= 0);
     // Size of each stripe (only counting data blocks)
     final int stripeSize = cellSize * numDataBlocks;
     // If block group ends at stripe boundary, each internal block has an equal
@@ -168,7 +193,8 @@ public class StripedBlockUtil {
 
     final int numStripes = (int) ((dataSize - 1) / stripeSize + 1);
     return (numStripes - 1L)*cellSize
-        + lastCellSize(lastStripeDataLen, cellSize, numDataBlocks, i);
+        + lastCellSize(lastStripeDataLen, cellSize,
+        numDataBlocks, idxInBlockGroup);
   }
 
   /**

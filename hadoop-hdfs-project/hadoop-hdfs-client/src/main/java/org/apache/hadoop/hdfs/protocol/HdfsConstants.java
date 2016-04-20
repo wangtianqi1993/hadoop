@@ -144,6 +144,10 @@ public final class HdfsConstants {
     ALL, LIVE, DEAD, DECOMMISSIONING
   }
 
+  public static final byte RS_6_3_POLICY_ID = 0;
+  public static final byte RS_3_2_POLICY_ID = 1;
+  public static final byte RS_6_3_LEGACY_POLICY_ID = 2;
+
   /* Hidden constructor */
   protected HdfsConstants() {
   }

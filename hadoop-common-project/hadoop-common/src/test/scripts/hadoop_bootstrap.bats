@@ -15,14 +15,14 @@
 
 load hadoop-functions_test_helper
 
-@test "hadoop_deprecate_envvar (no libexec)" {
+@test "hadoop_bootstrap (no libexec)" {
   unset HADOOP_LIBEXEC_DIR
   run hadoop_bootstrap
   [ "${status}" -eq 1 ]
 }
 
-@test "hadoop_deprecate_envvar (libexec)" {
-  unset   HADOOP_PREFIX
+@test "hadoop_bootstrap (libexec)" {
+  unset   HADOOP_HOME
   unset   HADOOP_COMMON_DIR
   unset   HADOOP_COMMON_LIB_JARS_DIR
   unset   HDFS_DIR
@@ -31,13 +31,15 @@ load hadoop-functions_test_helper
   unset   YARN_LIB_JARS_DIR
   unset   MAPRED_DIR
   unset   MAPRED_LIB_JARS_DIR
-  unset   TOOL_PATH
+  unset   HADOOP_TOOLS_HOME
+  unset   HADOOP_TOOLS_DIR
+  unset   HADOOP_TOOLS_LIB_JARS_DIR
   unset   HADOOP_OS_TYPE
 
   hadoop_bootstrap
 
   # all of these should be set
-  [ -n ${HADOOP_PREFIX} ]
+  [ -n ${HADOOP_HOME} ]
   [ -n ${HADOOP_COMMON_DIR} ]
   [ -n ${HADOOP_COMMON_LIB_JARS_DIR} ]
   [ -n ${HDFS_DIR} ]
@@ -46,6 +48,9 @@ load hadoop-functions_test_helper
   [ -n ${YARN_LIB_JARS_DIR} ]
   [ -n ${MAPRED_DIR} ]
   [ -n ${MAPRED_LIB_JARS_DIR} ]
-  [ -n ${TOOL_PATH} ]
   [ -n ${HADOOP_OS_TYPE} ]
-} 
+  [ -n ${HADOOP_TOOLS_PATH} ]
+  [ -n ${HADOOP_TOOLS_HOME} ]
+  [ -n ${HADOOP_TOOLS_DIR} ]
+  [ -n ${HADOOP_TOOLS_LIB_JARS_DIR} ]
+}

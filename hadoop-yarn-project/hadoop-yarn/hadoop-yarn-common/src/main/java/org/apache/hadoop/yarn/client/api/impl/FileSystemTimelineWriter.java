@@ -19,12 +19,14 @@
 package org.apache.hadoop.yarn.client.api.impl;
 
 import java.io.Closeable;
+import java.io.FileNotFoundException;
 import java.io.Flushable;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -78,12 +80,6 @@ public class FileSystemTimelineWriter extends TimelineWriter{
   private static final Log LOG = LogFactory
       .getLog(FileSystemTimelineWriter.class);
 
-  // This is temporary solution. The configuration will be deleted once we have
-  // the FileSystem API to check whether append operation is supported or not.
-  private static final String TIMELINE_SERVICE_ENTITYFILE_FS_SUPPORT_APPEND
-      = YarnConfiguration.TIMELINE_SERVICE_PREFIX
-          + "entity-file.fs-support-append";
-
   // App log directory must be readable by group so server can access logs
   // and writable by group so it can be deleted by server
   private static final short APP_LOG_DIR_PERMISSIONS = 0770;
@@ -102,6 +98,7 @@ public class FileSystemTimelineWriter extends TimelineWriter{
   private long ttl;
   private LogFDsCache logFDsCache = null;
   private boolean isAppendSupported;
+  private final AttemptDirCache attemptDirCache;
 
   public FileSystemTimelineWriter(Configuration conf,
       UserGroupInformation authUgi, Client client, URI resURI)
@@ -122,20 +119,10 @@ public class FileSystemTimelineWriter extends TimelineWriter{
           .TIMELINE_SERVICE_ENTITYGROUP_FS_STORE_ACTIVE_DIR,
       YarnConfiguration
           .TIMELINE_SERVICE_ENTITYGROUP_FS_STORE_ACTIVE_DIR_DEFAULT));
+    fs = FileSystem.newInstance(activePath.toUri(), fsConf);
 
-    String scheme = activePath.toUri().getScheme();
-    if (scheme == null) {
-      scheme = FileSystem.getDefaultUri(fsConf).getScheme();
-    }
-    if (scheme != null) {
-      String disableCacheName = String.format("fs.%s.impl.disable.cache",
-          scheme);
-      fsConf.setBoolean(disableCacheName, true);
-    }
-
-    fs = activePath.getFileSystem(fsConf);
     if (!fs.exists(activePath)) {
-      throw new IOException(activePath + " does not exist");
+      throw new FileNotFoundException(activePath + " does not exist");
     }
 
     summaryEntityTypes = new HashSet<String>(
@@ -168,9 +155,19 @@ public class FileSystemTimelineWriter extends TimelineWriter{
             timerTaskTTL);
 
     this.isAppendSupported =
-        conf.getBoolean(TIMELINE_SERVICE_ENTITYFILE_FS_SUPPORT_APPEND, true);
+        conf.getBoolean(
+            YarnConfiguration.TIMELINE_SERVICE_ENTITYFILE_FS_SUPPORT_APPEND, true);
 
     objMapper = createObjectMapper();
+
+    int attemptDirCacheSize = conf.getInt(
+        YarnConfiguration
+            .TIMELINE_SERVICE_CLIENT_INTERNAL_ATTEMPT_DIR_CACHE_SIZE,
+        YarnConfiguration
+            .DEFAULT_TIMELINE_SERVICE_CLIENT_INTERNAL_ATTEMPT_DIR_CACHE_SIZE);
+
+    attemptDirCache =
+        new AttemptDirCache(attemptDirCacheSize, fs, activePath);
 
     if (LOG.isDebugEnabled()) {
       StringBuilder debugMSG = new StringBuilder();
@@ -181,7 +178,7 @@ public class FileSystemTimelineWriter extends TimelineWriter{
               + "=" + cleanIntervalSecs + ", " +
           YarnConfiguration.TIMELINE_SERVICE_CLIENT_FD_RETAIN_SECS
               + "=" + ttl + ", " +
-          TIMELINE_SERVICE_ENTITYFILE_FS_SUPPORT_APPEND
+          YarnConfiguration.TIMELINE_SERVICE_ENTITYFILE_FS_SUPPORT_APPEND
               + "=" + isAppendSupported + ", " +
           YarnConfiguration.TIMELINE_SERVICE_ENTITYGROUP_FS_STORE_ACTIVE_DIR
               + "=" + activePath);
@@ -193,6 +190,11 @@ public class FileSystemTimelineWriter extends TimelineWriter{
       }
       LOG.debug(debugMSG.toString());
     }
+  }
+
+  @Override
+  public String toString() {
+    return "FileSystemTimelineWriter writing to " + activePath;
   }
 
   @Override
@@ -208,7 +210,7 @@ public class FileSystemTimelineWriter extends TimelineWriter{
         = new ArrayList<TimelineEntity>();
     List<TimelineEntity> entitiesToEntityCache
         = new ArrayList<TimelineEntity>();
-    Path attemptDir = createAttemptDir(appAttemptId);
+    Path attemptDir = attemptDirCache.getAppAttemptDir(appAttemptId);
 
     for (TimelineEntity entity : entities) {
       if (summaryEntityTypes.contains(entity.getEntityType())) {
@@ -263,9 +265,20 @@ public class FileSystemTimelineWriter extends TimelineWriter{
   }
 
   @Override
-  public void close() throws Exception {
-    if (this.logFDsCache != null) {
-      this.logFDsCache.close();
+  public synchronized void close() throws Exception {
+    if (logFDsCache != null) {
+      LOG.debug("Closing cache");
+      logFDsCache.flush();
+      logFDsCache.close();
+      logFDsCache = null;
+    }
+  }
+
+  @Override
+  public void flush() throws IOException {
+    if (logFDsCache != null) {
+      LOG.debug("Flushing cache");
+      logFDsCache.flush();
     }
   }
 
@@ -277,34 +290,15 @@ public class FileSystemTimelineWriter extends TimelineWriter{
     return mapper;
   }
 
-  private Path createAttemptDir(ApplicationAttemptId appAttemptId)
-      throws IOException {
-    Path appDir = createApplicationDir(appAttemptId.getApplicationId());
-
-    Path attemptDir = new Path(appDir, appAttemptId.toString());
-    if (!fs.exists(attemptDir)) {
-      FileSystem.mkdirs(fs, attemptDir, new FsPermission(
-          APP_LOG_DIR_PERMISSIONS));
-    }
-    return attemptDir;
-  }
-
-  private Path createApplicationDir(ApplicationId appId) throws IOException {
-    Path appDir =
-        new Path(activePath, appId.toString());
-    if (!fs.exists(appDir)) {
-      FileSystem.mkdirs(fs, appDir, new FsPermission(APP_LOG_DIR_PERMISSIONS));
-    }
-    return appDir;
-  }
-
   private void writeDomain(ApplicationAttemptId appAttemptId,
       TimelineDomain domain) throws IOException {
     Path domainLogPath =
-        new Path(createAttemptDir(appAttemptId), DOMAIN_LOG_PREFIX
-            + appAttemptId.toString());
-    LOG.info("Writing domains for " + appAttemptId.toString() + " to "
-        + domainLogPath);
+        new Path(attemptDirCache.getAppAttemptDir(appAttemptId),
+            DOMAIN_LOG_PREFIX + appAttemptId.toString());
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Writing domains for " + appAttemptId.toString() + " to "
+          + domainLogPath);
+    }
     this.logFDsCache.writeDomainLog(
         fs, domainLogPath, objMapper, domain, isAppendSupported);
   }
@@ -332,6 +326,9 @@ public class FileSystemTimelineWriter extends TimelineWriter{
         throws IOException {
       if (writerClosed()) {
         prepareForWrite();
+      }
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Writing entity list of size " + entities.size());
       }
       for (TimelineEntity entity : entities) {
         getObjectMapper().writeValue(getJsonGenerator(), entity);
@@ -382,6 +379,8 @@ public class FileSystemTimelineWriter extends TimelineWriter{
       this.stream = createLogFileStream(fs, logPath);
       this.jsonGenerator = new JsonFactory().createJsonGenerator(stream);
       this.jsonGenerator.setPrettyPrinter(new MinimalPrettyPrinter("\n"));
+      this.jsonGenerator.configure(
+          JsonGenerator.Feature.FLUSH_PASSED_TO_STREAM, false);
       this.lastModifiedTime = Time.monotonicNow();
     }
 
@@ -949,6 +948,72 @@ public class FileSystemTimelineWriter extends TimelineWriter{
       } finally {
         this.timerTasksMonitorReadLock.unlock();
       }
+    }
+  }
+
+  private static class AttemptDirCache {
+    private final int attemptDirCacheSize;
+    private final Map<ApplicationAttemptId, Path> attemptDirCache;
+    private final FileSystem fs;
+    private final Path activePath;
+
+    public AttemptDirCache(int cacheSize, FileSystem fs, Path activePath) {
+      this.attemptDirCacheSize = cacheSize;
+      this.attemptDirCache =
+          new LinkedHashMap<ApplicationAttemptId, Path>(
+              attemptDirCacheSize, 0.75f, true) {
+            private static final long serialVersionUID = 1L;
+            @Override
+            protected boolean removeEldestEntry(
+                Map.Entry<ApplicationAttemptId, Path> eldest) {
+              return size() > attemptDirCacheSize;
+            }
+          };
+      this.fs = fs;
+      this.activePath = activePath;
+    }
+
+    public Path getAppAttemptDir(ApplicationAttemptId attemptId)
+        throws IOException {
+      Path attemptDir = this.attemptDirCache.get(attemptId);
+      if (attemptDir == null) {
+        synchronized(this) {
+          attemptDir = this.attemptDirCache.get(attemptId);
+          if (attemptDir == null) {
+            attemptDir = createAttemptDir(attemptId);
+            attemptDirCache.put(attemptId, attemptDir);
+          }
+        }
+      }
+      return attemptDir;
+    }
+
+    private Path createAttemptDir(ApplicationAttemptId appAttemptId)
+        throws IOException {
+      Path appDir = createApplicationDir(appAttemptId.getApplicationId());
+
+      Path attemptDir = new Path(appDir, appAttemptId.toString());
+      if (!fs.exists(attemptDir)) {
+        FileSystem.mkdirs(fs, attemptDir, new FsPermission(
+            APP_LOG_DIR_PERMISSIONS));
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("New attempt directory created - " + attemptDir);
+        }
+      }
+      return attemptDir;
+    }
+
+    private Path createApplicationDir(ApplicationId appId) throws IOException {
+      Path appDir =
+          new Path(activePath, appId.toString());
+      if (!fs.exists(appDir)) {
+        FileSystem.mkdirs(fs, appDir,
+            new FsPermission(APP_LOG_DIR_PERMISSIONS));
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("New app directory created - " + appDir);
+        }
+      }
+      return appDir;
     }
   }
 }

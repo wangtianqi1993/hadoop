@@ -638,13 +638,27 @@ public class NetUtils {
 
   /**
    * Return hostname without throwing exception.
+   * The returned hostname String format is "hostname".
+   * @return hostname
+   */
+  public static String getLocalHostname() {
+    try {
+      return InetAddress.getLocalHost().getHostName();
+    } catch(UnknownHostException uhe) {
+      return "" + uhe;
+    }
+  }
+
+  /**
+   * Return hostname without throwing exception.
+   * The returned hostname String format is "hostname/ip address".
    * @return hostname
    */
   public static String getHostname() {
     try {return "" + InetAddress.getLocalHost();}
     catch(UnknownHostException uhe) {return "" + uhe;}
   }
-  
+
   /**
    * Compose a "host:port" string from the address.
    */
@@ -768,12 +782,21 @@ public class NetUtils {
               + ": " + exception
               + ";"
               + see("EOFException"));
+    } else if (exception instanceof SocketException) {
+      // Many of the predecessor exceptions are subclasses of SocketException,
+      // so must be handled before this
+      return wrapWithMessage(exception,
+          "Call From "
+              + localHost + " to " + destHost + ":" + destPort
+              + " failed on socket exception: " + exception
+              + ";"
+              + see("SocketException"));
     }
     else {
       return (IOException) new IOException("Failed on local exception: "
-                                               + exception
-                                               + "; Host Details : "
-                                               + getHostDetailsAsString(destHost, destPort, localHost))
+             + exception
+             + "; Host Details : "
+             + getHostDetailsAsString(destHost, destPort, localHost))
           .initCause(exception);
 
     }

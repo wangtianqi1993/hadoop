@@ -74,6 +74,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
+import org.apache.hadoop.classification.InterfaceAudience.Public;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configuration.IntegerRanges;
@@ -133,7 +134,7 @@ import com.google.protobuf.Message.Builder;
  * 
  * @see Client
  */
-@InterfaceAudience.LimitedPrivate(value = { "Common", "HDFS", "MapReduce", "Yarn" })
+@Public
 @InterfaceStability.Evolving
 public abstract class Server {
   private final boolean authorize;
@@ -142,8 +143,22 @@ public abstract class Server {
   private ExceptionsHandler exceptionsHandler = new ExceptionsHandler();
   private Tracer tracer;
   
+  /**
+   * Add exception classes for which server won't log stack traces.
+   *
+   * @param exceptionClass exception classes
+   */
   public void addTerseExceptions(Class<?>... exceptionClass) {
-    exceptionsHandler.addTerseExceptions(exceptionClass);
+    exceptionsHandler.addTerseLoggingExceptions(exceptionClass);
+  }
+
+  /**
+   * Add exception classes which server won't log at all.
+   *
+   * @param exceptionClass exception classes
+   */
+  public void addSuppressedLoggingExceptions(Class<?>... exceptionClass) {
+    exceptionsHandler.addSuppressedLoggingExceptions(exceptionClass);
   }
 
   /**
@@ -151,29 +166,54 @@ public abstract class Server {
    * e.g., terse exception group for concise logging messages
    */
   static class ExceptionsHandler {
-    private volatile Set<String> terseExceptions = new HashSet<String>();
+    private volatile Set<String> terseExceptions = new HashSet<>();
+    private volatile Set<String> suppressedExceptions = new HashSet<>();
 
     /**
-     * Add exception class so server won't log its stack trace.
-     * Modifying the terseException through this method is thread safe.
-     *
+     * Add exception classes for which server won't log stack traces.
+     * Optimized for infrequent invocation.
      * @param exceptionClass exception classes 
      */
-    void addTerseExceptions(Class<?>... exceptionClass) {
+    void addTerseLoggingExceptions(Class<?>... exceptionClass) {
+      // Thread-safe replacement of terseExceptions.
+      terseExceptions = addExceptions(terseExceptions, exceptionClass);
+    }
 
-      // Make a copy of terseException for performing modification
-      final HashSet<String> newSet = new HashSet<String>(terseExceptions);
+    /**
+     * Add exception classes which server won't log at all.
+     * Optimized for infrequent invocation.
+     * @param exceptionClass exception classes
+     */
+    void addSuppressedLoggingExceptions(Class<?>... exceptionClass) {
+      // Thread-safe replacement of suppressedExceptions.
+      suppressedExceptions = addExceptions(
+          suppressedExceptions, exceptionClass);
+    }
+
+    boolean isTerseLog(Class<?> t) {
+      return terseExceptions.contains(t.toString());
+    }
+
+    boolean isSuppressedLog(Class<?> t) {
+      return suppressedExceptions.contains(t.toString());
+    }
+
+    /**
+     * Return a new set containing all the exceptions in exceptionsSet
+     * and exceptionClass.
+     * @return
+     */
+    private static Set<String> addExceptions(
+        final Set<String> exceptionsSet, Class<?>[] exceptionClass) {
+      // Make a copy of the exceptionSet for performing modification
+      final HashSet<String> newSet = new HashSet<>(exceptionsSet);
 
       // Add all class names into the HashSet
       for (Class<?> name : exceptionClass) {
         newSet.add(name.toString());
       }
-      // Replace terseException set
-      terseExceptions = Collections.unmodifiableSet(newSet);
-    }
 
-    boolean isTerse(Class<?> t) {
-      return terseExceptions.contains(t.toString());
+      return Collections.unmodifiableSet(newSet);
     }
   }
 
@@ -357,6 +397,15 @@ public abstract class Server {
     return CurCall.get() != null;
   }
 
+  /**
+   * Return the priority level assigned by call queue to an RPC
+   * Returns 0 in case no priority is assigned.
+   */
+  public static int getPriorityLevel() {
+    Call call = CurCall.get();
+    return call != null? call.getPriorityLevel() : 0;
+  }
+
   private String bindAddress; 
   private int port;                               // port we listen on
   private int handlerCount;                       // number of handler threads
@@ -391,7 +440,7 @@ public abstract class Server {
 
   /**
    * Checks if LogSlowRPC is set true.
-   * @return
+   * @return true, if LogSlowRPC is set true, false, otherwise.
    */
   protected boolean isLogSlowRPC() {
     return logSlowRPC;
@@ -440,6 +489,18 @@ public abstract class Server {
                 " milliseconds to process from client " + client);
       }
       rpcMetrics.incrSlowRpc();
+    }
+  }
+
+  void updateMetrics(String name, int queueTime, int processingTime) {
+    rpcMetrics.addRpcQueueTime(queueTime);
+    rpcMetrics.addRpcProcessingTime(processingTime);
+    rpcDetailedMetrics.addProcessingTime(name, processingTime);
+    callQueue.addResponseTime(name, getPriorityLevel(), queueTime,
+        processingTime);
+
+    if (isLogSlowRPC()) {
+      logSlowRpcCalls(name, processingTime);
     }
   }
 
@@ -539,6 +600,10 @@ public abstract class Server {
     return serviceAuthorizationManager;
   }
 
+  private String getQueueClassPrefix() {
+    return CommonConfigurationKeys.IPC_NAMESPACE + "." + port;
+  }
+
   static Class<? extends BlockingQueue<Call>> getQueueClass(
       String prefix, Configuration conf) {
     String name = prefix + "." + CommonConfigurationKeys.IPC_CALLQUEUE_IMPL_KEY;
@@ -546,8 +611,29 @@ public abstract class Server {
     return CallQueueManager.convertQueueClass(queueClass, Call.class);
   }
 
-  private String getQueueClassPrefix() {
-    return CommonConfigurationKeys.IPC_CALLQUEUE_NAMESPACE + "." + port;
+  static Class<? extends RpcScheduler> getSchedulerClass(
+      String prefix, Configuration conf) {
+    String schedulerKeyname = prefix + "." + CommonConfigurationKeys
+        .IPC_SCHEDULER_IMPL_KEY;
+    Class<?> schedulerClass = conf.getClass(schedulerKeyname, null);
+    // Patch the configuration for legacy fcq configuration that does not have
+    // a separate scheduler setting
+    if (schedulerClass == null) {
+      String queueKeyName = prefix + "." + CommonConfigurationKeys
+          .IPC_CALLQUEUE_IMPL_KEY;
+      Class<?> queueClass = conf.getClass(queueKeyName, null);
+      if (queueClass != null) {
+        if (queueClass.getCanonicalName().equals(
+            FairCallQueue.class.getCanonicalName())) {
+          conf.setClass(schedulerKeyname, DecayRpcScheduler.class,
+              RpcScheduler.class);
+        }
+      }
+    }
+    schedulerClass = conf.getClass(schedulerKeyname,
+        DefaultRpcScheduler.class);
+
+    return CallQueueManager.convertSchedulerClass(schedulerClass);
   }
 
   /*
@@ -556,7 +642,8 @@ public abstract class Server {
   public synchronized void refreshCallQueue(Configuration conf) {
     // Create the next queue
     String prefix = getQueueClassPrefix();
-    callQueue.swapQueue(getQueueClass(prefix, conf), maxQueueSize, prefix, conf);
+    callQueue.swapQueue(getSchedulerClass(prefix, conf),
+        getQueueClass(prefix, conf), maxQueueSize, prefix, conf);
   }
 
   /**
@@ -584,6 +671,8 @@ public abstract class Server {
     private final byte[] clientId;
     private final TraceScope traceScope; // the HTrace scope on the server side
     private final CallerContext callerContext; // the call context
+    private int priorityLevel;
+    // the priority level assigned by scheduler, 0 by default
 
     private Call(Call call) {
       this(call.callId, call.retryCount, call.rpcRequest, call.connection,
@@ -670,7 +759,16 @@ public abstract class Server {
     @Override
     public UserGroupInformation getUserGroupInformation() {
       return connection.user;
-    }    
+    }
+
+    @Override
+    public int getPriorityLevel() {
+      return this.priorityLevel;
+    }
+
+    public void setPriorityLevel(int priorityLevel) {
+      this.priorityLevel = priorityLevel;
+    }
   }
 
   /** Listens on the socket. Creates jobs for the handler threads*/
@@ -881,7 +979,7 @@ public abstract class Server {
     }
 
     void doRead(SelectionKey key) throws InterruptedException {
-      int count = 0;
+      int count;
       Connection c = (Connection)key.attachment();
       if (c == null) {
         return;  
@@ -894,13 +992,17 @@ public abstract class Server {
         LOG.info(Thread.currentThread().getName() + ": readAndProcess caught InterruptedException", ieo);
         throw ieo;
       } catch (Exception e) {
-        // a WrappedRpcServerException is an exception that has been sent
-        // to the client, so the stacktrace is unnecessary; any other
-        // exceptions are unexpected internal server errors and thus the
-        // stacktrace should be logged
-        LOG.info(Thread.currentThread().getName() + ": readAndProcess from client " +
-            c.getHostAddress() + " threw exception [" + e + "]",
-            (e instanceof WrappedRpcServerException) ? null : e);
+        // Do not log WrappedRpcServerExceptionSuppressed.
+        if (!(e instanceof WrappedRpcServerExceptionSuppressed)) {
+          // A WrappedRpcServerException is an exception that has been sent
+          // to the client, so the stacktrace is unnecessary; any other
+          // exceptions are unexpected internal server errors and thus the
+          // stacktrace should be logged.
+          LOG.info(Thread.currentThread().getName() +
+              ": readAndProcess from client " + c.getHostAddress() +
+              " threw exception [" + e + "]",
+              (e instanceof WrappedRpcServerException) ? null : e);
+        }
         count = -1; //so that the (count < 0) block is executed
       }
       if (count < 0) {
@@ -1240,6 +1342,18 @@ public abstract class Server {
     @Override
     public String toString() {
       return getCause().toString();
+    }
+  }
+
+  /**
+   * A WrappedRpcServerException that is suppressed altogether
+   * for the purposes of logging.
+   */
+  private static class WrappedRpcServerExceptionSuppressed
+      extends WrappedRpcServerException {
+    public WrappedRpcServerExceptionSuppressed(
+        RpcErrorCodeProto errCode, IOException ioe) {
+      super(errCode, ioe);
     }
   }
 
@@ -2096,6 +2210,9 @@ public abstract class Server {
           rpcRequest, this, ProtoUtil.convert(header.getRpcKind()),
           header.getClientId().toByteArray(), traceScope, callerContext);
 
+      // Save the priority level assignment by the scheduler
+      call.setPriorityLevel(callQueue.getPriorityLevel(call));
+
       if (callQueue.isClientBackoffEnabled()) {
         // if RPC queue is full, we will ask the RPC client to back off by
         // throwing RetriableException. Whether RPC client will honor
@@ -2111,13 +2228,14 @@ public abstract class Server {
 
     private void queueRequestOrAskClientToBackOff(Call call)
         throws WrappedRpcServerException, InterruptedException {
-      // If rpc queue is full, we will ask the client to back off.
-      boolean isCallQueued = callQueue.offer(call);
-      if (!isCallQueued) {
+      // If rpc scheduler indicates back off based on performance
+      // degradation such as response time or rpc queue is full,
+      // we will ask the client to back off.
+      if (callQueue.shouldBackOff(call) || !callQueue.offer(call)) {
         rpcMetrics.incrClientBackoff();
         RetriableException retriableException =
             new RetriableException("Server is too busy.");
-        throw new WrappedRpcServerException(
+        throw new WrappedRpcServerExceptionSuppressed(
             RpcErrorCodeProto.ERROR_RPC_SERVER, retriableException);
       }
     }
@@ -2313,18 +2431,7 @@ public abstract class Server {
             if (e instanceof UndeclaredThrowableException) {
               e = e.getCause();
             }
-            String logMsg = Thread.currentThread().getName() + ", call " + call;
-            if (exceptionsHandler.isTerse(e.getClass())) {
-              // Don't log the whole stack trace. Way too noisy!
-              LOG.info(logMsg + ": " + e);
-            } else if (e instanceof RuntimeException || e instanceof Error) {
-              // These exception types indicate something is probably wrong
-              // on the server side, as opposed to just a normal exceptional
-              // result.
-              LOG.warn(logMsg, e);
-            } else {
-              LOG.info(logMsg, e);
-            }
+            logException(LOG, e, call);
             if (e instanceof RpcServerException) {
               RpcServerException rse = ((RpcServerException)e); 
               returnStatus = rse.getRpcStatusProto();
@@ -2376,6 +2483,26 @@ public abstract class Server {
       LOG.debug(Thread.currentThread().getName() + ": exiting");
     }
 
+  }
+
+  @VisibleForTesting
+  void logException(Log logger, Throwable e, Call call) {
+    if (exceptionsHandler.isSuppressedLog(e.getClass())) {
+      return; // Log nothing.
+    }
+
+    final String logMsg = Thread.currentThread().getName() + ", call " + call;
+    if (exceptionsHandler.isTerseLog(e.getClass())) {
+      // Don't log the whole stack trace. Way too noisy!
+      logger.info(logMsg + ": " + e);
+    } else if (e instanceof RuntimeException || e instanceof Error) {
+      // These exception types indicate something is probably wrong
+      // on the server side, as opposed to just a normal exceptional
+      // result.
+      logger.warn(logMsg, e);
+    } else {
+      logger.info(logMsg, e);
+    }
   }
   
   protected Server(String bindAddress, int port,
@@ -2449,6 +2576,7 @@ public abstract class Server {
     // Setup appropriate callqueue
     final String prefix = getQueueClassPrefix();
     this.callQueue = new CallQueueManager<Call>(getQueueClass(prefix, conf),
+        getSchedulerClass(prefix, conf),
         getClientBackoffEnable(prefix, conf), maxQueueSize, prefix, conf);
 
     this.secretManager = (SecretManager<TokenIdentifier>) secretManager;
@@ -2482,7 +2610,7 @@ public abstract class Server {
       saslPropsResolver = SaslPropertiesResolver.getInstance(conf);
     }
     
-    this.exceptionsHandler.addTerseExceptions(StandbyException.class);
+    this.exceptionsHandler.addTerseLoggingExceptions(StandbyException.class);
   }
   
   private RpcSaslProto buildNegotiateResponse(List<AuthMethod> authMethods)

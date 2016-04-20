@@ -61,7 +61,9 @@ import javax.security.sasl.Sasl;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.classification.InterfaceAudience.Public;
 import org.apache.hadoop.classification.InterfaceStability;
+import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
@@ -96,6 +98,7 @@ import org.apache.htrace.core.Tracer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.CodedOutputStream;
 
@@ -105,9 +108,9 @@ import com.google.protobuf.CodedOutputStream;
  * 
  * @see Server
  */
-@InterfaceAudience.LimitedPrivate(value = { "Common", "HDFS", "MapReduce", "Yarn" })
+@Public
 @InterfaceStability.Evolving
-public class Client {
+public class Client implements AutoCloseable {
   
   public static final Log LOG = LogFactory.getLog(Client.class);
 
@@ -116,6 +119,20 @@ public class Client {
 
   private static final ThreadLocal<Integer> callId = new ThreadLocal<Integer>();
   private static final ThreadLocal<Integer> retryCount = new ThreadLocal<Integer>();
+  private static final ThreadLocal<Future<?>> returnValue = new ThreadLocal<>();
+  private static final ThreadLocal<Boolean> asynchronousMode =
+      new ThreadLocal<Boolean>() {
+        @Override
+        protected Boolean initialValue() {
+          return false;
+        }
+      };
+
+  @SuppressWarnings("unchecked")
+  @Unstable
+  public static <T> Future<T> getReturnValue() {
+    return (Future<T>) returnValue.get();
+  }
 
   /** Set call id and retry count for the next call. */
   public static void setCallIdAndRetryCount(int cid, int rc) {
@@ -239,13 +256,32 @@ public class Client {
    * 
    * @param conf Configuration
    * @return the timeout period in milliseconds. -1 if no timeout value is set
+   * @deprecated use {@link #getRpcTimeout(Configuration)} instead
    */
+  @Deprecated
   final public static int getTimeout(Configuration conf) {
+    int timeout = getRpcTimeout(conf);
+    if (timeout > 0)  {
+      return timeout;
+    }
     if (!conf.getBoolean(CommonConfigurationKeys.IPC_CLIENT_PING_KEY,
         CommonConfigurationKeys.IPC_CLIENT_PING_DEFAULT)) {
       return getPingInterval(conf);
     }
     return -1;
+  }
+
+  /**
+   * The time after which a RPC will timeout.
+   *
+   * @param conf Configuration
+   * @return the timeout period in milliseconds.
+   */
+  public static final int getRpcTimeout(Configuration conf) {
+    int timeout =
+        conf.getInt(CommonConfigurationKeys.IPC_CLIENT_RPC_TIMEOUT_KEY,
+            CommonConfigurationKeys.IPC_CLIENT_RPC_TIMEOUT_DEFAULT);
+    return (timeout < 0) ? 0 : timeout;
   }
   /**
    * set the connection timeout value in configuration
@@ -386,7 +422,7 @@ public class Client {
     private Socket socket = null;                 // connected socket
     private DataInputStream in;
     private DataOutputStream out;
-    private int rpcTimeout;
+    private final int rpcTimeout;
     private int maxIdleTime; //connections will be culled if it was idle for 
     //maxIdleTime msecs
     private final RetryPolicy connectionRetryPolicy;
@@ -394,8 +430,9 @@ public class Client {
     private int maxRetriesOnSocketTimeouts;
     private final boolean tcpNoDelay; // if T then disable Nagle's Algorithm
     private final boolean tcpLowLatency; // if T then use low-delay QoS
-    private boolean doPing; //do we need to send ping message
-    private int pingInterval; // how often sends ping to the server in msecs
+    private final boolean doPing; //do we need to send ping message
+    private final int pingInterval; // how often sends ping to the server
+    private final int soTimeout; // used by ipc ping and rpc timeout
     private ByteArrayOutputStream pingRequest; // ping message
     
     // currently active calls
@@ -434,6 +471,14 @@ public class Client {
         pingHeader.writeDelimitedTo(pingRequest);
       }
       this.pingInterval = remoteId.getPingInterval();
+      if (rpcTimeout > 0) {
+        // effective rpc timeout is rounded up to multiple of pingInterval
+        // if pingInterval < rpcTimeout.
+        this.soTimeout = (doPing && pingInterval < rpcTimeout) ?
+            pingInterval : rpcTimeout;
+      } else {
+        this.soTimeout = pingInterval;
+      }
       this.serviceClass = serviceClass;
       if (LOG.isDebugEnabled()) {
         LOG.debug("The ping interval is " + this.pingInterval + " ms.");
@@ -484,12 +529,12 @@ public class Client {
 
       /* Process timeout exception
        * if the connection is not going to be closed or 
-       * is not configured to have a RPC timeout, send a ping.
-       * (if rpcTimeout is not set to be 0, then RPC should timeout.
-       * otherwise, throw the timeout exception.
+       * the RPC is not timed out yet, send a ping.
        */
-      private void handleTimeout(SocketTimeoutException e) throws IOException {
-        if (shouldCloseConnection.get() || !running.get() || rpcTimeout > 0) {
+      private void handleTimeout(SocketTimeoutException e, int waiting)
+          throws IOException {
+        if (shouldCloseConnection.get() || !running.get() ||
+            (0 < rpcTimeout && rpcTimeout <= waiting)) {
           throw e;
         } else {
           sendPing();
@@ -503,11 +548,13 @@ public class Client {
        */
       @Override
       public int read() throws IOException {
+        int waiting = 0;
         do {
           try {
             return super.read();
           } catch (SocketTimeoutException e) {
-            handleTimeout(e);
+            waiting += soTimeout;
+            handleTimeout(e, waiting);
           }
         } while (true);
       }
@@ -520,11 +567,13 @@ public class Client {
        */
       @Override
       public int read(byte[] buf, int off, int len) throws IOException {
+        int waiting = 0;
         do {
           try {
             return super.read(buf, off, len);
           } catch (SocketTimeoutException e) {
-            handleTimeout(e);
+            waiting += soTimeout;
+            handleTimeout(e, waiting);
           }
         } while (true);
       }
@@ -632,10 +681,7 @@ public class Client {
           }
           
           NetUtils.connect(this.socket, server, connectionTimeout);
-          if (rpcTimeout > 0) {
-            pingInterval = rpcTimeout;  // rpcTimeout overwrites pingInterval
-          }
-          this.socket.setSoTimeout(pingInterval);
+          this.socket.setSoTimeout(soTimeout);
           return;
         } catch (ConnectTimeoutException toe) {
           /* Check for an address change and update the local reference.
@@ -1120,12 +1166,11 @@ public class Client {
         if (LOG.isDebugEnabled())
           LOG.debug(getName() + " got value #" + callId);
 
-        Call call = calls.get(callId);
         RpcStatusProto status = header.getStatus();
         if (status == RpcStatusProto.SUCCESS) {
           Writable value = ReflectionUtils.newInstance(valueClass, conf);
           value.readFields(in);                 // read value
-          calls.remove(callId);
+          final Call call = calls.remove(callId);
           call.setRpcResponse(value);
           
           // verify that length was correct
@@ -1157,7 +1202,7 @@ public class Client {
           }
           RemoteException re = new RemoteException(exceptionClassName, errorMsg, erCode);
           if (status == RpcStatusProto.ERROR) {
-            calls.remove(callId);
+            final Call call = calls.remove(callId);
             call.setException(re);
           } else if (status == RpcStatusProto.FATAL) {
             // Close the connection
@@ -1288,85 +1333,6 @@ public class Client {
     clientExcecutorFactory.unrefAndCleanup();
   }
 
-  /**
-   * Same as {@link #call(RPC.RpcKind, Writable, ConnectionId)}
-   *  for RPC_BUILTIN
-   */
-  public Writable call(Writable param, InetSocketAddress address)
-      throws IOException {
-    ConnectionId remoteId = ConnectionId.getConnectionId(address, null, null, 0,
-        conf);
-    return call(RpcKind.RPC_BUILTIN, param, remoteId);
-  }
-
-  /**
-   * Same as {@link #call(RPC.RpcKind, Writable, InetSocketAddress,
-   * Class, UserGroupInformation, int, Configuration)}
-   * except that rpcKind is writable.
-   */
-  public Writable call(Writable param, InetSocketAddress addr,
-      Class<?> protocol, UserGroupInformation ticket,
-      int rpcTimeout, Configuration conf) throws IOException {
-    ConnectionId remoteId = ConnectionId.getConnectionId(addr, protocol,
-        ticket, rpcTimeout, conf);
-    return call(RPC.RpcKind.RPC_BUILTIN, param, remoteId);
-  }
-  
-  /**
-   * Same as {@link #call(Writable, InetSocketAddress,
-   * Class, UserGroupInformation, int, Configuration)}
-   * except that specifying serviceClass.
-   */
-  public Writable call(Writable param, InetSocketAddress addr,
-      Class<?> protocol, UserGroupInformation ticket,
-      int rpcTimeout, int serviceClass, Configuration conf)
-      throws IOException {
-    ConnectionId remoteId = ConnectionId.getConnectionId(addr, protocol,
-        ticket, rpcTimeout, conf);
-    return call(RPC.RpcKind.RPC_BUILTIN, param, remoteId, serviceClass);
-  }
-
-  /**
-   * Make a call, passing <code>param</code>, to the IPC server running at
-   * <code>address</code> which is servicing the <code>protocol</code> protocol,
-   * with the <code>ticket</code> credentials, <code>rpcTimeout</code> as
-   * timeout and <code>conf</code> as conf for this connection, returning the
-   * value. Throws exceptions if there are network problems or if the remote
-   * code threw an exception.
-   */
-  public Writable call(RPC.RpcKind rpcKind, Writable param, InetSocketAddress addr, 
-                       Class<?> protocol, UserGroupInformation ticket,
-                       int rpcTimeout, Configuration conf) throws IOException {
-    ConnectionId remoteId = ConnectionId.getConnectionId(addr, protocol,
-        ticket, rpcTimeout, conf);
-    return call(rpcKind, param, remoteId);
-  }
-  
-  /**
-   * Same as {link {@link #call(RPC.RpcKind, Writable, ConnectionId)}
-   * except the rpcKind is RPC_BUILTIN
-   */
-  public Writable call(Writable param, ConnectionId remoteId)
-      throws IOException {
-     return call(RPC.RpcKind.RPC_BUILTIN, param, remoteId);
-  }
-  
-  /**
-   * Make a call, passing <code>rpcRequest</code>, to the IPC server defined by
-   * <code>remoteId</code>, returning the rpc respond.
-   *
-   * @param rpcKind
-   * @param rpcRequest -  contains serialized method and method parameters
-   * @param remoteId - the target rpc server
-   * @returns the rpc response
-   * Throws exceptions if there are network problems or if the remote code 
-   * threw an exception.
-   */
-  public Writable call(RPC.RpcKind rpcKind, Writable rpcRequest,
-      ConnectionId remoteId) throws IOException {
-    return call(rpcKind, rpcRequest, remoteId, RPC.RPC_SERVICE_CLASS_DEFAULT);
-  }
-
   /** 
    * Make a call, passing <code>rpcRequest</code>, to the IPC server defined by
    * <code>remoteId</code>, returning the rpc respond.
@@ -1390,23 +1356,6 @@ public class Client {
   /**
    * Make a call, passing <code>rpcRequest</code>, to the IPC server defined by
    * <code>remoteId</code>, returning the rpc response.
-   * 
-   * @param rpcKind
-   * @param rpcRequest -  contains serialized method and method parameters
-   * @param remoteId - the target rpc server
-   * @param serviceClass - service class for RPC
-   * @returns the rpc response
-   * Throws exceptions if there are network problems or if the remote code 
-   * threw an exception.
-   */
-  public Writable call(RPC.RpcKind rpcKind, Writable rpcRequest,
-      ConnectionId remoteId, int serviceClass) throws IOException {
-    return call(rpcKind, rpcRequest, remoteId, serviceClass, null);
-  }
-
-  /**
-   * Make a call, passing <code>rpcRequest</code>, to the IPC server defined by
-   * <code>remoteId</code>, returning the rpc response.
    *
    * @param rpcKind
    * @param rpcRequest -  contains serialized method and method parameters
@@ -1418,12 +1367,12 @@ public class Client {
    * Throws exceptions if there are network problems or if the remote code
    * threw an exception.
    */
-  public Writable call(RPC.RpcKind rpcKind, Writable rpcRequest,
+  Writable call(RPC.RpcKind rpcKind, Writable rpcRequest,
       ConnectionId remoteId, int serviceClass,
       AtomicBoolean fallbackToSimpleAuth) throws IOException {
     final Call call = createCall(rpcKind, rpcRequest);
-    Connection connection = getConnection(remoteId, call, serviceClass,
-      fallbackToSimpleAuth);
+    final Connection connection = getConnection(remoteId, call, serviceClass,
+        fallbackToSimpleAuth);
     try {
       connection.sendRpcRequest(call);                 // send the rpc request
     } catch (RejectedExecutionException e) {
@@ -1434,6 +1383,51 @@ public class Client {
       throw new IOException(e);
     }
 
+    if (isAsynchronousMode()) {
+      Future<Writable> returnFuture = new AbstractFuture<Writable>() {
+        @Override
+        public Writable get() throws InterruptedException, ExecutionException {
+          try {
+            set(getRpcResponse(call, connection));
+          } catch (IOException ie) {
+            setException(ie);
+          }
+          return super.get();
+        }
+      };
+
+      returnValue.set(returnFuture);
+      return null;
+    } else {
+      return getRpcResponse(call, connection);
+    }
+  }
+
+  /**
+   * Check if RPC is in asynchronous mode or not.
+   *
+   * @returns true, if RPC is in asynchronous mode, otherwise false for
+   *          synchronous mode.
+   */
+  @Unstable
+  static boolean isAsynchronousMode() {
+    return asynchronousMode.get();
+  }
+
+  /**
+   * Set RPC to asynchronous or synchronous mode.
+   *
+   * @param async
+   *          true, RPC will be in asynchronous mode, otherwise false for
+   *          synchronous mode
+   */
+  @Unstable
+  public static void setAsynchronousMode(boolean async) {
+    asynchronousMode.set(async);
+  }
+
+  private Writable getRpcResponse(final Call call, final Connection connection)
+      throws IOException {
     synchronized (call) {
       while (!call.done) {
         try {
@@ -1620,12 +1614,6 @@ public class Client {
       return saslQop;
     }
     
-    static ConnectionId getConnectionId(InetSocketAddress addr,
-        Class<?> protocol, UserGroupInformation ticket, int rpcTimeout,
-        Configuration conf) throws IOException {
-      return getConnectionId(addr, protocol, ticket, rpcTimeout, null, conf);
-    }
-
     /**
      * Returns a ConnectionId object. 
      * @param addr Remote address for the connection.
@@ -1713,5 +1701,11 @@ public class Client {
    */
   public static int nextCallId() {
     return callIdCounter.getAndIncrement() & 0x7FFFFFFF;
+  }
+
+  @Override
+  @Unstable
+  public void close() throws Exception {
+    stop();
   }
 }

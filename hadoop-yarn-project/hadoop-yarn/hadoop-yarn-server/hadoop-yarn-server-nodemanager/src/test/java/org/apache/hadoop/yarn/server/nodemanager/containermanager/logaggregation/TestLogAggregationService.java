@@ -223,16 +223,27 @@ public class TestLogAggregationService extends BaseContainerManagerTest {
         any(UserGroupInformation.class));
     verify(delSrvc).delete(eq(user), eq((Path) null),
       eq(new Path(app1LogDir.getAbsolutePath())));
-    delSrvc.stop();
     
     String containerIdStr = ConverterUtils.toString(container11);
     File containerLogDir = new File(app1LogDir, containerIdStr);
+    int count = 0;
+    int maxAttempts = 50;
     for (String fileType : new String[] { "stdout", "stderr", "syslog" }) {
       File f = new File(containerLogDir, fileType);
-      Assert.assertFalse("check "+f, f.exists());
+      count = 0;
+      while ((f.exists()) && (count < maxAttempts)) {
+        count++;
+        Thread.sleep(100);
+      }
+      Assert.assertFalse("File [" + f + "] was not deleted", f.exists());
     }
-
-    Assert.assertFalse(app1LogDir.exists());
+    count = 0;
+    while ((app1LogDir.exists()) && (count < maxAttempts)) {
+      count++;
+      Thread.sleep(100);
+    }
+    Assert.assertFalse("Directory [" + app1LogDir + "] was not deleted",
+      app1LogDir.exists());
 
     Path logFilePath =
         logAggregationService.getRemoteNodeLogFileForApp(application1,
@@ -2276,7 +2287,7 @@ public class TestLogAggregationService extends BaseContainerManagerTest {
         Records.newRecord(LogAggregationContext.class);
     logAggregationContext.setLogAggregationPolicyClassName(
         FailedOrKilledContainerLogAggregationPolicy.class.getName());
-    verifySkipUnnecessaryNNOperations(logAggregationContext, 0, 2);
+    verifySkipUnnecessaryNNOperations(logAggregationContext, 0, 2, 0);
   }
 
   @Test (timeout = 20000)
@@ -2290,13 +2301,13 @@ public class TestLogAggregationService extends BaseContainerManagerTest {
         AMOnlyLogAggregationPolicy.class.getName());
     contextWithAMOnly.setRolledLogsIncludePattern("sys*");
     contextWithAMOnly.setRolledLogsExcludePattern("std_final");
-    verifySkipUnnecessaryNNOperations(contextWithAMOnly, 1, 4);
+    verifySkipUnnecessaryNNOperations(contextWithAMOnly, 1, 4, 1);
   }
 
   private void verifySkipUnnecessaryNNOperations(
       LogAggregationContext logAggregationContext,
-      int expectedLogAggregationTimes, int expectedAggregationReportNum)
-      throws Exception {
+      int expectedLogAggregationTimes, int expectedAggregationReportNum,
+      int expectedCleanupOldLogsTimes) throws Exception {
     LogAggregationService logAggregationService = new LogAggregationService(
         dispatcher, this.context, this.delSrvc, super.dirsHandler);
     logAggregationService.init(this.conf);
@@ -2307,7 +2318,7 @@ public class TestLogAggregationService extends BaseContainerManagerTest {
         null, this.acls, logAggregationContext));
 
     // Container finishes
-    String[] logFiles = new String[] { "stdout" };
+    String[] logFiles = new String[] { "sysout" };
     finishContainer(appId, logAggregationService,
         ContainerType.APPLICATION_MASTER, 1, 0, logFiles);
     AppLogAggregatorImpl aggregator =
@@ -2327,6 +2338,8 @@ public class TestLogAggregationService extends BaseContainerManagerTest {
         aggregator.getLogAggregationTimes());
     assertEquals(expectedAggregationReportNum,
         this.context.getLogAggregationStatusForApps().size());
+    assertEquals(expectedCleanupOldLogsTimes,
+        aggregator.getCleanupOldLogTimes());
   }
 
   private int numOfLogsAvailable(LogAggregationService logAggregationService,

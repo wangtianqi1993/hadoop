@@ -26,6 +26,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -37,6 +38,7 @@ import com.amazonaws.auth.AWSCredentialsProviderChain;
 
 import com.amazonaws.auth.InstanceProfileCredentialsProvider;
 import com.amazonaws.services.s3.AmazonS3Client;
+import com.amazonaws.services.s3.S3ClientOptions;
 import com.amazonaws.services.s3.model.CannedAccessControlList;
 import com.amazonaws.services.s3.model.DeleteObjectRequest;
 import com.amazonaws.services.s3.model.DeleteObjectsRequest;
@@ -242,6 +244,15 @@ public class S3AFileSystem extends FileSystem {
         LOG.error(msg);
         throw new IllegalArgumentException(msg, e);
       }
+    }
+    enablePathStyleAccessIfRequired(conf);
+  }
+
+  private void enablePathStyleAccessIfRequired(Configuration conf) {
+    final boolean pathStyleAccess = conf.getBoolean(PATH_STYLE_ACCESS, false);
+    if (pathStyleAccess) {
+      LOG.debug("Enabling path style access!");
+      s3.setS3ClientOptions(new S3ClientOptions().withPathStyleAccess(true));
     }
   }
 
@@ -787,11 +798,14 @@ public class S3AFileSystem extends FileSystem {
       ObjectListing objects = s3.listObjects(request);
       statistics.incrementReadOps(1);
 
+      Path fQualified = f.makeQualified(uri, workingDir);
+
       while (true) {
         for (S3ObjectSummary summary : objects.getObjectSummaries()) {
           Path keyPath = keyToPath(summary.getKey()).makeQualified(uri, workingDir);
           // Skip over keys that are ourselves and old S3N _$folder$ files
-          if (keyPath.equals(f) || summary.getKey().endsWith(S3N_FOLDER_SUFFIX)) {
+          if (keyPath.equals(fQualified) ||
+              summary.getKey().endsWith(S3N_FOLDER_SUFFIX)) {
             if (LOG.isDebugEnabled()) {
               LOG.debug("Ignoring: " + keyPath);
             }
@@ -806,7 +820,7 @@ public class S3AFileSystem extends FileSystem {
           } else {
             result.add(new S3AFileStatus(summary.getSize(),
                 dateToLong(summary.getLastModified()), keyPath,
-                getDefaultBlockSize(f.makeQualified(uri, workingDir))));
+                getDefaultBlockSize(fQualified)));
             if (LOG.isDebugEnabled()) {
               LOG.debug("Adding: fi: " + keyPath);
             }
@@ -1128,7 +1142,7 @@ public class S3AFileSystem extends FileSystem {
     }
 
     ObjectMetadata srcom = s3.getObjectMetadata(bucket, srcKey);
-    final ObjectMetadata dstom = srcom.clone();
+    ObjectMetadata dstom = cloneObjectMetadata(srcom);
     if (StringUtils.isNotBlank(serverSideEncryptionAlgorithm)) {
       dstom.setSSEAlgorithm(serverSideEncryptionAlgorithm);
     }
@@ -1232,6 +1246,73 @@ public class S3AFileSystem extends FileSystem {
     putObjectRequest.setCannedAcl(cannedACL);
     s3.putObject(putObjectRequest);
     statistics.incrementWriteOps(1);
+  }
+
+  /**
+   * Creates a copy of the passed {@link ObjectMetadata}.
+   * Does so without using the {@link ObjectMetadata#clone()} method,
+   * to avoid copying unnecessary headers.
+   * @param source the {@link ObjectMetadata} to copy
+   * @return a copy of {@link ObjectMetadata} with only relevant attributes
+   */
+  private ObjectMetadata cloneObjectMetadata(ObjectMetadata source) {
+    // This approach may be too brittle, especially if
+    // in future there are new attributes added to ObjectMetadata
+    // that we do not explicitly call to set here
+    ObjectMetadata ret = new ObjectMetadata();
+
+    // Non null attributes
+    ret.setContentLength(source.getContentLength());
+
+    // Possibly null attributes
+    // Allowing nulls to pass breaks it during later use
+    if (source.getCacheControl() != null) {
+      ret.setCacheControl(source.getCacheControl());
+    }
+    if (source.getContentDisposition() != null) {
+      ret.setContentDisposition(source.getContentDisposition());
+    }
+    if (source.getContentEncoding() != null) {
+      ret.setContentEncoding(source.getContentEncoding());
+    }
+    if (source.getContentMD5() != null) {
+      ret.setContentMD5(source.getContentMD5());
+    }
+    if (source.getContentType() != null) {
+      ret.setContentType(source.getContentType());
+    }
+    if (source.getExpirationTime() != null) {
+      ret.setExpirationTime(source.getExpirationTime());
+    }
+    if (source.getExpirationTimeRuleId() != null) {
+      ret.setExpirationTimeRuleId(source.getExpirationTimeRuleId());
+    }
+    if (source.getHttpExpiresDate() != null) {
+      ret.setHttpExpiresDate(source.getHttpExpiresDate());
+    }
+    if (source.getLastModified() != null) {
+      ret.setLastModified(source.getLastModified());
+    }
+    if (source.getOngoingRestore() != null) {
+      ret.setOngoingRestore(source.getOngoingRestore());
+    }
+    if (source.getRestoreExpirationTime() != null) {
+      ret.setRestoreExpirationTime(source.getRestoreExpirationTime());
+    }
+    if (source.getSSEAlgorithm() != null) {
+      ret.setSSEAlgorithm(source.getSSEAlgorithm());
+    }
+    if (source.getSSECustomerAlgorithm() != null) {
+      ret.setSSECustomerAlgorithm(source.getSSECustomerAlgorithm());
+    }
+    if (source.getSSECustomerKeyMd5() != null) {
+      ret.setSSECustomerKeyMd5(source.getSSECustomerKeyMd5());
+    }
+
+    for (Map.Entry<String, String> e : source.getUserMetadata().entrySet()) {
+      ret.addUserMetadata(e.getKey(), e.getValue());
+    }
+    return ret;
   }
 
   /**

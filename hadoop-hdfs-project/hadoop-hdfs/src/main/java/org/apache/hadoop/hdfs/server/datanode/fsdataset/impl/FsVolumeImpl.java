@@ -240,6 +240,11 @@ public class FsVolumeImpl implements FsVolumeSpi {
     Preconditions.checkState(reference.getReferenceCount() > 0);
   }
 
+  @VisibleForTesting
+  int getReferenceCount() {
+    return this.reference.getReferenceCount();
+  }
+
   /**
    * Close this volume.
    * @throws IOException if the volume is closed.
@@ -247,6 +252,7 @@ public class FsVolumeImpl implements FsVolumeSpi {
   void setClosed() throws IOException {
     try {
       this.reference.setClosed();
+      dataset.stopAllDataxceiverThreads(this);
     } catch (ClosedChannelException e) {
       throw new IOException("The volume has already closed.", e);
     }
@@ -691,6 +697,18 @@ public class FsVolumeImpl implements FsVolumeSpi {
             } else {
               ExtendedBlock block =
                   new ExtendedBlock(bpid, Block.filename2id(state.curEntry));
+              File expectedBlockDir = DatanodeUtil.idToBlockDir(
+                  new File("."), block.getBlockId());
+              File actualBlockDir = Paths.get(".",
+                  state.curFinalizedDir, state.curFinalizedSubDir).toFile();
+              if (!expectedBlockDir.equals(actualBlockDir)) {
+                LOG.error("nextBlock({}, {}): block id {} found in invalid " +
+                    "directory.  Expected directory: {}.  " +
+                    "Actual directory: {}", storageID, bpid,
+                    block.getBlockId(), expectedBlockDir.getPath(),
+                    actualBlockDir.getPath());
+                continue;
+              }
               LOG.trace("nextBlock({}, {}): advancing to {}",
                   storageID, bpid, block);
               return block;

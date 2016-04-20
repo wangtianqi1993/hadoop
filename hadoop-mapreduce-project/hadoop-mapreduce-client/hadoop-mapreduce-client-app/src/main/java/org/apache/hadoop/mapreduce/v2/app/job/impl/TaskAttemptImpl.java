@@ -98,6 +98,7 @@ import org.apache.hadoop.mapreduce.v2.app.job.event.TaskAttemptStatusUpdateEvent
 import org.apache.hadoop.mapreduce.v2.app.job.event.TaskAttemptTooManyFetchFailureEvent;
 import org.apache.hadoop.mapreduce.v2.app.job.event.TaskEventType;
 import org.apache.hadoop.mapreduce.v2.app.job.event.TaskTAttemptEvent;
+import org.apache.hadoop.mapreduce.v2.app.job.event.TaskTAttemptKilledEvent;
 import org.apache.hadoop.mapreduce.v2.app.launcher.ContainerLauncher;
 import org.apache.hadoop.mapreduce.v2.app.launcher.ContainerLauncherEvent;
 import org.apache.hadoop.mapreduce.v2.app.launcher.ContainerRemoteLaunchEvent;
@@ -184,6 +185,7 @@ public abstract class TaskAttemptImpl implements
   private int httpPort;
   private Locality locality;
   private Avataar avataar;
+  private boolean rescheduleNextAttempt = false;
 
   private static final CleanupContainerTransition
       CLEANUP_CONTAINER_TRANSITION = new CleanupContainerTransition();
@@ -1378,6 +1380,16 @@ public abstract class TaskAttemptImpl implements
   }
 
   //always called in write lock
+  private boolean getRescheduleNextAttempt() {
+    return rescheduleNextAttempt;
+  }
+
+  //always called in write lock
+  private void setRescheduleNextAttempt(boolean reschedule) {
+    rescheduleNextAttempt = reschedule;
+  }
+
+  //always called in write lock
   private void setFinishTime() {
     //set the finish time only if launch time is set
     if (launchTime != 0) {
@@ -1406,29 +1418,36 @@ public abstract class TaskAttemptImpl implements
   
   private static void updateMillisCounters(JobCounterUpdateEvent jce,
       TaskAttemptImpl taskAttempt) {
-    TaskType taskType = taskAttempt.getID().getTaskId().getTaskType();
+    // if container/resource if not allocated, do not update
+    if (null == taskAttempt.container ||
+        null == taskAttempt.container.getResource()) {
+      return;
+    }
     long duration = (taskAttempt.getFinishTime() - taskAttempt.getLaunchTime());
-    int mbRequired =
-        taskAttempt.getMemoryRequired(taskAttempt.conf, taskType);
-    int vcoresRequired = taskAttempt.getCpuRequired(taskAttempt.conf, taskType);
-
+    Resource allocatedResource = taskAttempt.container.getResource();
+    int mbAllocated = allocatedResource.getMemory();
+    int vcoresAllocated = allocatedResource.getVirtualCores();
     int minSlotMemSize = taskAttempt.conf.getInt(
-      YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB,
-      YarnConfiguration.DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB);
+        YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB,
+        YarnConfiguration.DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB);
+    int simSlotsAllocated = minSlotMemSize == 0 ? 0 :
+        (int) Math.ceil((float) mbAllocated / minSlotMemSize);
 
-    int simSlotsRequired =
-        minSlotMemSize == 0 ? 0 : (int) Math.ceil((float) mbRequired
-            / minSlotMemSize);
-
+    TaskType taskType = taskAttempt.getID().getTaskId().getTaskType();
     if (taskType == TaskType.MAP) {
-      jce.addCounterUpdate(JobCounter.SLOTS_MILLIS_MAPS, simSlotsRequired * duration);
-      jce.addCounterUpdate(JobCounter.MB_MILLIS_MAPS, duration * mbRequired);
-      jce.addCounterUpdate(JobCounter.VCORES_MILLIS_MAPS, duration * vcoresRequired);
+      jce.addCounterUpdate(JobCounter.SLOTS_MILLIS_MAPS,
+          simSlotsAllocated * duration);
+      jce.addCounterUpdate(JobCounter.MB_MILLIS_MAPS, duration * mbAllocated);
+      jce.addCounterUpdate(JobCounter.VCORES_MILLIS_MAPS,
+          duration * vcoresAllocated);
       jce.addCounterUpdate(JobCounter.MILLIS_MAPS, duration);
     } else {
-      jce.addCounterUpdate(JobCounter.SLOTS_MILLIS_REDUCES, simSlotsRequired * duration);
-      jce.addCounterUpdate(JobCounter.MB_MILLIS_REDUCES, duration * mbRequired);
-      jce.addCounterUpdate(JobCounter.VCORES_MILLIS_REDUCES, duration * vcoresRequired);
+      jce.addCounterUpdate(JobCounter.SLOTS_MILLIS_REDUCES,
+          simSlotsAllocated * duration);
+      jce.addCounterUpdate(JobCounter.MB_MILLIS_REDUCES,
+          duration * mbAllocated);
+      jce.addCounterUpdate(JobCounter.VCORES_MILLIS_REDUCES,
+          duration * vcoresAllocated);
       jce.addCounterUpdate(JobCounter.MILLIS_REDUCES, duration);
     }
   }
@@ -1738,9 +1757,8 @@ public abstract class TaskAttemptImpl implements
               TaskEventType.T_ATTEMPT_FAILED));
           break;
         case KILLED:
-          taskAttempt.eventHandler.handle(new TaskTAttemptEvent(
-              taskAttempt.attemptId,
-              TaskEventType.T_ATTEMPT_KILLED));
+          taskAttempt.eventHandler.handle(new TaskTAttemptKilledEvent(
+              taskAttempt.attemptId, false));
           break;
         default:
           LOG.error("Task final state is not FAILED or KILLED: " + finalState);
@@ -2007,8 +2025,13 @@ public abstract class TaskAttemptImpl implements
           taskAttempt, TaskAttemptStateInternal.KILLED);
       taskAttempt.eventHandler.handle(new JobHistoryEvent(taskAttempt.attemptId
           .getTaskId().getJobId(), tauce));
-      taskAttempt.eventHandler.handle(new TaskTAttemptEvent(
-          taskAttempt.attemptId, TaskEventType.T_ATTEMPT_KILLED));
+      boolean rescheduleNextTaskAttempt = false;
+      if (event instanceof TaskAttemptKillEvent) {
+        rescheduleNextTaskAttempt =
+            ((TaskAttemptKillEvent)event).getRescheduleAttempt();
+      }
+      taskAttempt.eventHandler.handle(new TaskTAttemptKilledEvent(
+          taskAttempt.attemptId, rescheduleNextTaskAttempt));
       return TaskAttemptStateInternal.KILLED;
     }
   }
@@ -2037,6 +2060,12 @@ public abstract class TaskAttemptImpl implements
             taskAttempt.getID().toString());
         return TaskAttemptStateInternal.SUCCESS_CONTAINER_CLEANUP;
       } else {
+        // Store reschedule flag so that after clean up is completed, new
+        // attempt is scheduled/rescheduled based on it.
+        if (event instanceof TaskAttemptKillEvent) {
+          taskAttempt.setRescheduleNextAttempt(
+              ((TaskAttemptKillEvent)event).getRescheduleAttempt());
+        }
         return TaskAttemptStateInternal.KILL_CONTAINER_CLEANUP;
       }
     }
@@ -2068,9 +2097,8 @@ public abstract class TaskAttemptImpl implements
             ((TaskAttemptKillEvent) event).getMessage());
       }
 
-      taskAttempt.eventHandler.handle(new TaskTAttemptEvent(
-          taskAttempt.attemptId,
-          TaskEventType.T_ATTEMPT_KILLED));
+      taskAttempt.eventHandler.handle(new TaskTAttemptKilledEvent(
+          taskAttempt.attemptId, taskAttempt.getRescheduleNextAttempt()));
     }
   }
 
@@ -2088,9 +2116,8 @@ public abstract class TaskAttemptImpl implements
           taskAttempt.getAssignedContainerID(), taskAttempt.getAssignedContainerMgrAddress(),
           taskAttempt.container.getContainerToken(),
           ContainerLauncher.EventType.CONTAINER_REMOTE_CLEANUP));
-      taskAttempt.eventHandler.handle(new TaskTAttemptEvent(
-          taskAttempt.attemptId,
-          TaskEventType.T_ATTEMPT_KILLED));
+      taskAttempt.eventHandler.handle(new TaskTAttemptKilledEvent(
+          taskAttempt.attemptId, false));
 
     }
   }
@@ -2130,6 +2157,12 @@ public abstract class TaskAttemptImpl implements
       // for it.
       finalizeProgress(taskAttempt);
       sendContainerCleanup(taskAttempt, event);
+      // Store reschedule flag so that after clean up is completed, new
+      // attempt is scheduled/rescheduled based on it.
+      if (event instanceof TaskAttemptKillEvent) {
+        taskAttempt.setRescheduleNextAttempt(
+            ((TaskAttemptKillEvent)event).getRescheduleAttempt());
+      }
     }
   }
 

@@ -81,7 +81,6 @@ public class TestBlockReplacement {
     long bytesToSend = TOTAL_BYTES; 
     long start = Time.monotonicNow();
     DataTransferThrottler throttler = new DataTransferThrottler(bandwidthPerSec);
-    long totalBytes = 0L;
     long bytesSent = 1024*512L; // 0.5MB
     throttler.throttle(bytesSent);
     bytesToSend -= bytesSent;
@@ -93,7 +92,7 @@ public class TestBlockReplacement {
     } catch (InterruptedException ignored) {}
     throttler.throttle(bytesToSend);
     long end = Time.monotonicNow();
-    assertTrue(totalBytes*1000/(end-start)<=bandwidthPerSec);
+    assertTrue(TOTAL_BYTES * 1000 / (end - start) <= bandwidthPerSec);
   }
   
   @Test
@@ -412,11 +411,19 @@ public class TestBlockReplacement {
           (DatanodeInfo)sourceDnDesc, (DatanodeInfo)sourceDnDesc,
           (DatanodeInfo)destDnDesc));
       // Waiting for the FsDatasetAsyncDsikService to delete the block
-      Thread.sleep(3000);
-      // Triggering the incremental block report to report the deleted block to
-      // namnemode
-      cluster.getDataNodes().get(0).triggerBlockReport(
-         new BlockReportOptions.Factory().setIncremental(true).build());
+      for (int tries = 0; tries < 20; tries++) {
+        Thread.sleep(1000);
+        // Triggering the deletion block report to report the deleted block
+        // to namnemode
+        DataNodeTestUtils.triggerDeletionReport(cluster.getDataNodes().get(0));
+        locatedBlocks =
+            client.getNamenode().getBlockLocations("/tmp.txt", 0, 10L)
+                .getLocatedBlocks();
+        // If block was deleted and only on 1 datanode then break out
+        if (locatedBlocks.get(0).getLocations().length == 1) {
+          break;
+        }
+      }
 
       cluster.transitionToStandby(0);
       cluster.transitionToActive(1);

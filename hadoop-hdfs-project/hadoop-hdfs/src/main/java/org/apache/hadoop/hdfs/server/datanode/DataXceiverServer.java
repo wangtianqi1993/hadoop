@@ -75,7 +75,7 @@ class DataXceiverServer implements Runnable {
     private BlockBalanceThrottler(long bandwidth, int maxThreads) {
       super(bandwidth);
       this.maxThreads.set(maxThreads);
-      LOG.info("Balancing bandwith is " + bandwidth + " bytes/s");
+      LOG.info("Balancing bandwidth is " + bandwidth + " bytes/s");
       LOG.info("Number threads for balancing is " + maxThreads);
     }
 
@@ -254,6 +254,12 @@ class DataXceiverServer implements Runnable {
       } catch (InterruptedException e) {
         LOG.warn("Interrupted when sending OOB message.");
       }
+    }
+  }
+
+  public synchronized void stopWriters() {
+    for (Peer p : peers.keySet()) {
+      peersXceiver.get(p).stopWriter();
     }
   }
   

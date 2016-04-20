@@ -1747,6 +1747,18 @@ public class YarnConfiguration extends Configuration {
   public static final long
       TIMELINE_SERVICE_CLIENT_INTERNAL_TIMERS_TTL_SECS_DEFAULT = 7 * 60;
 
+  public static final String
+      TIMELINE_SERVICE_CLIENT_INTERNAL_ATTEMPT_DIR_CACHE_SIZE =
+      TIMELINE_SERVICE_CLIENT_PREFIX + "internal-attempt-dir-cache-size";
+  public static final int
+      DEFAULT_TIMELINE_SERVICE_CLIENT_INTERNAL_ATTEMPT_DIR_CACHE_SIZE = 1000;
+
+  // This is temporary solution. The configuration will be deleted once we have
+  // the FileSystem API to check whether append operation is supported or not.
+  public static final String TIMELINE_SERVICE_ENTITYFILE_FS_SUPPORT_APPEND
+      = TIMELINE_SERVICE_PREFIX
+      + "entity-file.fs-support-append";
+
   // mark app-history related configs @Private as application history is going
   // to be integrated into the timeline service
   @Private
@@ -2398,6 +2410,30 @@ public class YarnConfiguration extends Configuration {
 
   public static final String NM_SCRIPT_BASED_NODE_LABELS_PROVIDER_SCRIPT_OPTS =
       NM_SCRIPT_BASED_NODE_LABELS_PROVIDER_PREFIX + "opts";
+
+  // RM and NM CSRF props
+  public static final String REST_CSRF = "webapp.rest-csrf.";
+  public static final String RM_CSRF_PREFIX = RM_PREFIX + REST_CSRF;
+  public static final String NM_CSRF_PREFIX = NM_PREFIX + REST_CSRF;
+  public static final String TIMELINE_CSRF_PREFIX = TIMELINE_SERVICE_PREFIX +
+                                                    REST_CSRF;
+  public static final String RM_CSRF_ENABLED = RM_CSRF_PREFIX + "enabled";
+  public static final String NM_CSRF_ENABLED = NM_CSRF_PREFIX + "enabled";
+  public static final String TIMELINE_CSRF_ENABLED = TIMELINE_CSRF_PREFIX +
+                                                     "enabled";
+  public static final String RM_CSRF_CUSTOM_HEADER = RM_CSRF_PREFIX +
+                                                     "custom-header";
+  public static final String NM_CSRF_CUSTOM_HEADER = NM_CSRF_PREFIX +
+                                                     "custom-header";
+  public static final String TIMELINE_CSRF_CUSTOM_HEADER =
+      TIMELINE_CSRF_PREFIX + "custom-header";
+  public static final String RM_CSRF_METHODS_TO_IGNORE = RM_CSRF_PREFIX +
+                                                     "methods-to-ignore";
+  public static final String NM_CSRF_METHODS_TO_IGNORE = NM_CSRF_PREFIX +
+                                                         "methods-to-ignore";
+  public static final String TIMELINE_CSRF_METHODS_TO_IGNORE =
+      TIMELINE_CSRF_PREFIX + "methods-to-ignore";
+
 
   public YarnConfiguration() {
     super();

@@ -41,6 +41,44 @@ function hadoop_debug
   fi
 }
 
+## @description  Given variable $1 delete $2 from it
+## @audience     public
+## @stability    stable
+## @replaceable  no
+function hadoop_delete_entry
+{
+  if [[ ${!1} =~ \ ${2}\  ]] ; then
+    hadoop_debug "Removing ${2} from ${1}"
+    eval "${1}"=\""${!1// ${2} }"\"
+  fi
+}
+
+## @description  Given variable $1 add $2 to it
+## @audience     public
+## @stability    stable
+## @replaceable  no
+function hadoop_add_entry
+{
+  if [[ ! ${!1} =~ \ ${2}\  ]] ; then
+    hadoop_debug "Adding ${2} to ${1}"
+    #shellcheck disable=SC2140
+    eval "${1}"=\""${!1} ${2} "\"
+  fi
+}
+
+## @description  Given variable $1 determine if $2 is in it
+## @audience     public
+## @stability    stable
+## @replaceable  no
+## @return       0 = yes, 1 = no
+function hadoop_verify_entry
+{
+  # this unfortunately can't really be tested by bats. :(
+  # so if this changes, be aware that unit tests effectively
+  # do this function in them
+  [[ ${!1} =~ \ ${2}\  ]]
+}
+
 ## @description  Add a subcommand to the usage output
 ## @audience     private
 ## @stability    evolving
@@ -240,7 +278,7 @@ function hadoop_bootstrap
   # By now, HADOOP_LIBEXEC_DIR should have been defined upstream
   # We can piggyback off of that to figure out where the default
   # HADOOP_FREFIX should be.  This allows us to run without
-  # HADOOP_PREFIX ever being defined by a human! As a consequence
+  # HADOOP_HOME ever being defined by a human! As a consequence
   # HADOOP_LIBEXEC_DIR now becomes perhaps the single most powerful
   # env var within Hadoop.
   if [[ -z "${HADOOP_LIBEXEC_DIR}" ]]; then
@@ -248,8 +286,8 @@ function hadoop_bootstrap
     exit 1
   fi
   HADOOP_DEFAULT_PREFIX=$(cd -P -- "${HADOOP_LIBEXEC_DIR}/.." >/dev/null && pwd -P)
-  HADOOP_PREFIX=${HADOOP_PREFIX:-$HADOOP_DEFAULT_PREFIX}
-  export HADOOP_PREFIX
+  HADOOP_HOME=${HADOOP_HOME:-$HADOOP_DEFAULT_PREFIX}
+  export HADOOP_HOME
 
   #
   # short-cuts. vendors may redefine these as well, preferably
@@ -264,10 +302,9 @@ function hadoop_bootstrap
   YARN_LIB_JARS_DIR=${YARN_LIB_JARS_DIR:-"share/hadoop/yarn/lib"}
   MAPRED_DIR=${MAPRED_DIR:-"share/hadoop/mapreduce"}
   MAPRED_LIB_JARS_DIR=${MAPRED_LIB_JARS_DIR:-"share/hadoop/mapreduce/lib"}
-
-  # setup a default HADOOP_TOOLS_PATH
-  hadoop_deprecate_envvar TOOL_PATH HADOOP_TOOLS_PATH
-  HADOOP_TOOLS_PATH=${HADOOP_TOOLS_PATH:-${HADOOP_PREFIX}/share/hadoop/tools/lib/*}
+  HADOOP_TOOLS_HOME=${HADOOP_TOOLS_HOME:-${HADOOP_HOME}}
+  HADOOP_TOOLS_DIR=${HADOOP_TOOLS_DIR:-"share/hadoop/tools"}
+  HADOOP_TOOLS_LIB_JARS_DIR=${HADOOP_TOOLS_LIB_JARS_DIR:-"${HADOOP_TOOLS_DIR}/lib"}
 
   # usage output set to zero
   hadoop_reset_usage
@@ -289,12 +326,12 @@ function hadoop_find_confdir
 
   # An attempt at compatibility with some Hadoop 1.x
   # installs.
-  if [[ -e "${HADOOP_PREFIX}/conf/hadoop-env.sh" ]]; then
+  if [[ -e "${HADOOP_HOME}/conf/hadoop-env.sh" ]]; then
     conf_dir="conf"
   else
     conf_dir="etc/hadoop"
   fi
-  export HADOOP_CONF_DIR="${HADOOP_CONF_DIR:-${HADOOP_PREFIX}/${conf_dir}}"
+  export HADOOP_CONF_DIR="${HADOOP_CONF_DIR:-${HADOOP_HOME}/${conf_dir}}"
 
   hadoop_debug "HADOOP_CONF_DIR=${HADOOP_CONF_DIR}"
 }
@@ -322,6 +359,7 @@ function hadoop_exec_hadoopenv
   if [[ -z "${HADOOP_ENV_PROCESSED}" ]]; then
     if [[ -f "${HADOOP_CONF_DIR}/hadoop-env.sh" ]]; then
       export HADOOP_ENV_PROCESSED=true
+      # shellcheck disable=SC1090
       . "${HADOOP_CONF_DIR}/hadoop-env.sh"
     fi
   fi
@@ -334,6 +372,7 @@ function hadoop_exec_hadoopenv
 function hadoop_exec_userfuncs
 {
   if [[ -e "${HADOOP_CONF_DIR}/hadoop-user-functions.sh" ]]; then
+    # shellcheck disable=SC1090
     . "${HADOOP_CONF_DIR}/hadoop-user-functions.sh"
   fi
 }
@@ -348,6 +387,7 @@ function hadoop_exec_hadooprc
 {
   if [[ -f "${HOME}/.hadooprc" ]]; then
     hadoop_debug "Applying the user's .hadooprc"
+    # shellcheck disable=SC1090
     . "${HOME}/.hadooprc"
   fi
 }
@@ -373,11 +413,22 @@ function hadoop_import_shellprofiles
     files2=(${HADOOP_CONF_DIR}/shellprofile.d/*.sh)
   fi
 
+  # enable bundled shellprofiles that come
+  # from hadoop-tools.  This converts the user-facing HADOOP_OPTIONAL_TOOLS
+  # to the HADOOP_TOOLS_OPTIONS that the shell profiles expect.
+  # See dist-tools-hooks-maker for how the example HADOOP_OPTIONAL_TOOLS
+  # gets populated into hadoop-env.sh
+
+  for i in ${HADOOP_OPTIONAL_TOOLS//,/ }; do
+    hadoop_add_entry HADOOP_TOOLS_OPTIONS "${i}"
+  done
+
   for i in "${files1[@]}" "${files2[@]}"
   do
     if [[ -n "${i}"
       && -f "${i}" ]]; then
       hadoop_debug "Profiles: importing ${i}"
+      # shellcheck disable=SC1090
       . "${i}"
     fi
   done
@@ -473,8 +524,8 @@ function hadoop_basic_init
   hadoop_debug "Initialize CLASSPATH"
 
   if [[ -z "${HADOOP_COMMON_HOME}" ]] &&
-  [[ -d "${HADOOP_PREFIX}/${HADOOP_COMMON_DIR}" ]]; then
-    export HADOOP_COMMON_HOME="${HADOOP_PREFIX}"
+  [[ -d "${HADOOP_HOME}/${HADOOP_COMMON_DIR}" ]]; then
+    export HADOOP_COMMON_HOME="${HADOOP_HOME}"
   fi
 
   # default policy file for service-level authorization
@@ -482,20 +533,20 @@ function hadoop_basic_init
 
   # define HADOOP_HDFS_HOME
   if [[ -z "${HADOOP_HDFS_HOME}" ]] &&
-     [[ -d "${HADOOP_PREFIX}/${HDFS_DIR}" ]]; then
-    export HADOOP_HDFS_HOME="${HADOOP_PREFIX}"
+     [[ -d "${HADOOP_HOME}/${HDFS_DIR}" ]]; then
+    export HADOOP_HDFS_HOME="${HADOOP_HOME}"
   fi
 
   # define HADOOP_YARN_HOME
   if [[ -z "${HADOOP_YARN_HOME}" ]] &&
-     [[ -d "${HADOOP_PREFIX}/${YARN_DIR}" ]]; then
-    export HADOOP_YARN_HOME="${HADOOP_PREFIX}"
+     [[ -d "${HADOOP_HOME}/${YARN_DIR}" ]]; then
+    export HADOOP_YARN_HOME="${HADOOP_HOME}"
   fi
 
   # define HADOOP_MAPRED_HOME
   if [[ -z "${HADOOP_MAPRED_HOME}" ]] &&
-     [[ -d "${HADOOP_PREFIX}/${MAPRED_DIR}" ]]; then
-    export HADOOP_MAPRED_HOME="${HADOOP_PREFIX}"
+     [[ -d "${HADOOP_HOME}/${MAPRED_DIR}" ]]; then
+    export HADOOP_MAPRED_HOME="${HADOOP_HOME}"
   fi
 
   if [[ ! -d "${HADOOP_COMMON_HOME}" ]]; then
@@ -522,7 +573,7 @@ function hadoop_basic_init
   # let's define it as 'hadoop'
   HADOOP_IDENT_STRING=${HADOOP_IDENT_STRING:-$USER}
   HADOOP_IDENT_STRING=${HADOOP_IDENT_STRING:-hadoop}
-  HADOOP_LOG_DIR=${HADOOP_LOG_DIR:-"${HADOOP_PREFIX}/logs"}
+  HADOOP_LOG_DIR=${HADOOP_LOG_DIR:-"${HADOOP_HOME}/logs"}
   HADOOP_LOGFILE=${HADOOP_LOGFILE:-hadoop.log}
   HADOOP_LOGLEVEL=${HADOOP_LOGLEVEL:-INFO}
   HADOOP_NICENESS=${HADOOP_NICENESS:-0}
@@ -945,34 +996,25 @@ function hadoop_add_common_to_classpath
   hadoop_add_classpath "${HADOOP_COMMON_HOME}/${HADOOP_COMMON_DIR}"'/*'
 }
 
-## @description  Add the HADOOP_TOOLS_PATH to the classpath
+## @description  Run libexec/tools/module.sh to add to the classpath
 ## @description  environment
 ## @audience     private
 ## @stability    evolving
 ## @replaceable  yes
-function hadoop_add_to_classpath_toolspath
+## @param        module
+function hadoop_add_to_classpath_tools
 {
-  declare -a array
-  declare -i c=0
-  declare -i j
-  declare -i i
-  declare idx
+  declare module=$1
 
-  if [[ -n "${HADOOP_TOOLS_PATH}" ]]; then
-    hadoop_debug "Adding HADOOP_TOOLS_PATH to CLASSPATH"
-    oldifs=${IFS}
-    IFS=:
-    for idx in ${HADOOP_TOOLS_PATH}; do
-      array[${c}]=${idx}
-      ((c=c+1))
-    done
-    IFS=${oldifs}
-    ((j=c-1)) || ${QATESTMODE}
+  if [[ -f "${HADOOP_LIBEXEC_DIR}/tools/${module}.sh" ]]; then
+    # shellcheck disable=SC1090
+    . "${HADOOP_LIBEXEC_DIR}/tools/${module}.sh"
+  else
+    hadoop_error "ERROR: Tools helper ${HADOOP_LIBEXEC_DIR}/tools/${module}.sh was not found."
+  fi
 
-    for ((i=0; i<=j; i++)); do
-      hadoop_add_classpath "${array[$i]}" after
-    done
-
+  if declare -f hadoop_classpath_tools_${module} >/dev/null 2>&1; then
+    "hadoop_classpath_tools_${module}"
   fi
 }
 
@@ -1177,7 +1219,6 @@ function hadoop_finalize_hadoop_opts
   hadoop_translate_cygwin_path HADOOP_LOG_DIR
   hadoop_add_param HADOOP_OPTS hadoop.log.dir "-Dhadoop.log.dir=${HADOOP_LOG_DIR}"
   hadoop_add_param HADOOP_OPTS hadoop.log.file "-Dhadoop.log.file=${HADOOP_LOGFILE}"
-  HADOOP_HOME=${HADOOP_PREFIX}
   hadoop_translate_cygwin_path HADOOP_HOME
   export HADOOP_HOME
   hadoop_add_param HADOOP_OPTS hadoop.home.dir "-Dhadoop.home.dir=${HADOOP_HOME}"
@@ -1210,11 +1251,11 @@ function hadoop_finalize_catalina_opts
 
   local prefix=${HADOOP_CATALINA_PREFIX}
 
-  hadoop_add_param CATALINA_OPTS hadoop.home.dir "-Dhadoop.home.dir=${HADOOP_PREFIX}"
+  hadoop_add_param CATALINA_OPTS hadoop.home.dir "-Dhadoop.home.dir=${HADOOP_HOME}"
   if [[ -n "${JAVA_LIBRARY_PATH}" ]]; then
     hadoop_add_param CATALINA_OPTS java.library.path "-Djava.library.path=${JAVA_LIBRARY_PATH}"
   fi
-  hadoop_add_param CATALINA_OPTS "${prefix}.home.dir" "-D${prefix}.home.dir=${HADOOP_PREFIX}"
+  hadoop_add_param CATALINA_OPTS "${prefix}.home.dir" "-D${prefix}.home.dir=${HADOOP_HOME}"
   hadoop_add_param CATALINA_OPTS "${prefix}.config.dir" "-D${prefix}.config.dir=${HADOOP_CATALINA_CONFIG}"
   hadoop_add_param CATALINA_OPTS "${prefix}.log.dir" "-D${prefix}.log.dir=${HADOOP_CATALINA_LOG}"
   hadoop_add_param CATALINA_OPTS "${prefix}.temp.dir" "-D${prefix}.temp.dir=${HADOOP_CATALINA_TEMP}"
@@ -1240,7 +1281,7 @@ function hadoop_finalize
   hadoop_finalize_hadoop_heap
   hadoop_finalize_hadoop_opts
 
-  hadoop_translate_cygwin_path HADOOP_PREFIX
+  hadoop_translate_cygwin_path HADOOP_HOME
   hadoop_translate_cygwin_path HADOOP_CONF_DIR
   hadoop_translate_cygwin_path HADOOP_COMMON_HOME
   hadoop_translate_cygwin_path HADOOP_HDFS_HOME

@@ -351,6 +351,16 @@
 </property>
 
 <property>
+  <name>yarn.app.mapreduce.am.log.level</name>
+  <value>INFO</value>
+  <description>The logging level for the MR ApplicationMaster. The allowed
+  levels are: OFF, FATAL, ERROR, WARN, INFO, DEBUG, TRACE and ALL.
+  The setting here could be overriden if "mapreduce.job.log4j-properties-file"
+  is set.
+  </description>
+</property>
+
+<property>
   <name>mapreduce.map.log.level</name>
   <value>INFO</value>
   <description>The logging level for the map task. The allowed levels are:
@@ -1850,6 +1860,32 @@
   sideband writes from subprocesses (e.g.: streaming jobs), etc.
   Negative values disable the limit.
   default is -1</description>
+</property>
+
+<property>
+  <description>
+    Enable the CSRF filter for the job history web app
+  </description>
+  <name>mapreduce.jobhistory.webapp.rest-csrf.enabled</name>
+  <value>false</value>
+</property>
+
+<property>
+  <description>
+    Optional parameter that indicates the custom header name to use for CSRF
+    protection.
+  </description>
+  <name>mapreduce.jobhistory.webapp.rest-csrf.custom-header</name>
+  <value>X-XSRF-Header</value>
+</property>
+
+<property>
+  <description>
+    Optional parameter that indicates the list of HTTP methods that do not
+    require CSRF protection
+  </description>
+  <name>mapreduce.jobhistory.webapp.rest-csrf.methods-to-ignore</name>
+  <value>GET,OPTIONS,HEAD</value>
 </property>
 
 </configuration>
